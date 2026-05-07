@@ -60,47 +60,114 @@ layer_state_t layer_state_set_user(layer_state_t state) {
 
 #ifdef OLED_ENABLE
 /*
- * Landscape status (fits 128 px wide OLEDs). Avoids snprintf to save AVR flash.
- * SPLIT_WPM_ENABLE mirrors WPM onto the slave half so both OLEDs stay in sync.
+ * Portrait OLED view with a large centered numeric speed readout.
+ *
+ * Design goal:
+ * - remove labels ("WPM", layer text, modifiers, etc.)
+ * - show only a big number that grows from 0 upward as you type
+ * - keep portrait orientation for easier top-down glance reading
+ *
+ * Implementation note:
+ * We draw a custom 7-segment style number with `oled_write_pixel` so we are not
+ * limited by the tiny built-in 6x8 text font. This gives us a much larger number
+ * without bringing in heavy bitmap assets.
  */
+oled_rotation_t oled_init_user(oled_rotation_t rotation) {
+    /* 270° gives a vertical read direction that is easier to see from above. */
+    return OLED_ROTATION_270;
+}
+
+/*
+ * Draw one thick segment rectangle (filled) for a 7-segment digit.
+ * `x`,`y` are top-left pixel coordinates in the rotated (portrait) OLED space.
+ */
+static void draw_seg(uint8_t x, uint8_t y, uint8_t w, uint8_t h) {
+    for (uint8_t yy = 0; yy < h; yy++) {
+        for (uint8_t xx = 0; xx < w; xx++) {
+            oled_write_pixel((uint8_t)(x + xx), (uint8_t)(y + yy), true);
+        }
+    }
+}
+
+/*
+ * Draw a large 7-segment digit.
+ *
+ * Segment map:
+ *   ---a---
+ *  |       |
+ *  f       b
+ *  |---g---|
+ *  e       c
+ *  |       |
+ *   ---d---
+ *
+ * Size used here (kept small enough to fit two digits in 32px portrait width):
+ * - total width  = 13 px
+ * - total height = 23 px
+ */
+static void draw_big_digit(uint8_t x, uint8_t y, uint8_t digit) {
+    static const uint8_t segmask[10] = {
+        /*0*/ 0b00111111, /* a b c d e f */
+        /*1*/ 0b00000110, /* b c */
+        /*2*/ 0b01011011, /* a b d e g */
+        /*3*/ 0b01001111, /* a b c d g */
+        /*4*/ 0b01100110, /* b c f g */
+        /*5*/ 0b01101101, /* a c d f g */
+        /*6*/ 0b01111101, /* a c d e f g */
+        /*7*/ 0b00000111, /* a b c */
+        /*8*/ 0b01111111, /* a b c d e f g */
+        /*9*/ 0b01101111  /* a b c d f g */
+    };
+
+    if (digit > 9) {
+        digit = 0;
+    }
+
+    uint8_t m = segmask[digit];
+
+    /* Horizontal segments: 9x2 rectangles */
+    if (m & (1 << 0)) draw_seg((uint8_t)(x + 2), (uint8_t)(y + 0), 9, 2);   /* a */
+    if (m & (1 << 3)) draw_seg((uint8_t)(x + 2), (uint8_t)(y + 21), 9, 2);  /* d */
+    if (m & (1 << 6)) draw_seg((uint8_t)(x + 2), (uint8_t)(y + 10), 9, 2);  /* g */
+
+    /* Vertical segments: 2x9 rectangles */
+    if (m & (1 << 5)) draw_seg((uint8_t)(x + 0), (uint8_t)(y + 1), 2, 9);   /* f */
+    if (m & (1 << 4)) draw_seg((uint8_t)(x + 0), (uint8_t)(y + 12), 2, 9);  /* e */
+    if (m & (1 << 1)) draw_seg((uint8_t)(x + 11), (uint8_t)(y + 1), 2, 9);  /* b */
+    if (m & (1 << 2)) draw_seg((uint8_t)(x + 11), (uint8_t)(y + 12), 2, 9); /* c */
+}
 
 bool oled_task_user(void) {
     oled_clear();
 
-    uint8_t layer_now = get_highest_layer(layer_state);
-    uint8_t mods      = get_mods();
-
+    /*
+     * Show the typing speed as a large two-digit number centered on screen.
+     * We clamp to 0..99 so the layout stays large and stable.
+     */
+    uint8_t val = 0;
 #ifdef WPM_ENABLE
-    oled_write_P(PSTR("WPM "), false);
-    /* get_u8_str uses a tiny static buffer inside QMK (RAM ok for short-lived draw). */
-    oled_write(get_u8_str(get_current_wpm(), ' '), false);
-    oled_write_P(PSTR(" "), false);
-#else
-    oled_write_P(PSTR("Lyr "), false);
+    val = get_current_wpm();
 #endif
-
-    switch (layer_now) {
-        case _BASE:
-            oled_write_ln_P(PSTR("Base"), false);
-            break;
-        case _NAV_SYM:
-            oled_write_ln_P(PSTR("Nav"), false);
-            break;
-        default:
-            oled_write_ln_P(PSTR("?"), false);
-            break;
+    if (val > 99) {
+        val = 99;
     }
 
-    oled_write_char((mods & MOD_MASK_CTRL) ? 'C' : '-', false);
-    oled_write_char((mods & MOD_MASK_SHIFT) ? 'S' : '-', false);
-    oled_write_char((mods & MOD_MASK_ALT) ? 'A' : '-', false);
-    oled_write_char((mods & MOD_MASK_GUI) ? 'G' : '-', false);
-    oled_write_P(PSTR(" "), false);
+    uint8_t tens = (uint8_t)(val / 10);
+    uint8_t ones = (uint8_t)(val % 10);
 
-    led_t led_state = host_keyboard_led_state();
-    oled_write_P(led_state.caps_lock ? PSTR("CAP ") : PSTR("--- "), false);
-    /* M = USB half, lowercase s = I2C / serial slave split (split link OK). */
-    oled_write_char(is_keyboard_master() ? 'M' : 's', false);
+    /* Portrait canvas here is 32w x 128h. Center two 13px digits with 2px gap. */
+    const uint8_t digit_w = 13;
+    const uint8_t gap     = 2;
+    const uint8_t total_w = (uint8_t)(digit_w * 2 + gap); /* 28 */
+    const uint8_t start_x = (uint8_t)((32 - total_w) / 2); /* centered -> 2 */
+    const uint8_t start_y = (uint8_t)((128 - 23) / 2);     /* vertically centered -> 52 */
+
+    /*
+     * Keep the leading zero for readability at a glance (e.g. "07").
+     * If you prefer blank leading zero, we can conditionally skip tens.
+     */
+    draw_big_digit(start_x, start_y, tens);
+    draw_big_digit((uint8_t)(start_x + digit_w + gap), start_y, ones);
 
     return false;
 }
@@ -148,21 +215,34 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
 [_NAV_SYM] = LAYOUT(
     KC_NO, KC_NO, KC_NO, KC_UP,   KC_NO, KC_NO,                   KC_LEFT, KC_RIGHT, KC_DOWN, KC_LCBR, KC_RCBR, KC_NO,
     KC_NO, KC_NO, KC_NO, KC_NO,   KC_NO, KC_NO,                   KC_NO,   KC_NO,    KC_NO,   KC_NO,   KC_NO,   KC_NO,
-    KC_NO, KC_NO, KC_NO, KC_UP,   KC_DOWN, KC_NO,                 KC_NO,   KC_LEFT,  KC_RGHT, KC_MINS, KC_PLUS, KC_NO,
+    KC_LALT, KC_LALT, KC_NO, KC_UP,   KC_DOWN, KC_NO,                 KC_NO,   KC_LEFT,  KC_RGHT, KC_MINS, KC_PLUS, KC_NO,
     KC_LSFT, KC_NO, KC_NO, KC_NO, KC_NO, KC_NO, KC_MUTE, KC_NO,   KC_NO,   KC_NO,    KC_NO,   KC_NO,   KC_NO,   KC_NO,
            KC_NO, KC_NO, KC_NO, KC_NO, KC_NO,                  KC_LALT, KC_BSPC, KC_NO, KC_NO, KC_NO
 )
 };
 
-#if defined(ENCODER_MAP_ENABLE)
+#ifdef ENCODER_ENABLE
 /*
- * Encoder behavior (both layers):
- * - Left knob turn: horizontal scroll (inverted direction for left-hand use).
- * - Right knob turn: volume control.
- * This keeps media volume on the right hand and navigation scrolling on the left.
+ * Split encoder handling:
+ * - index 0 => left encoder
+ * - index 1 => right encoder
+ *
+ * This is routed by QMK split transport, so behavior stays consistent regardless
+ * of which half is currently USB master.
  */
-const uint16_t PROGMEM encoder_map[][NUM_ENCODERS][NUM_DIRECTIONS] = {
-    [_BASE]     = { ENCODER_CCW_CW(MS_WHLR, MS_WHLL), ENCODER_CCW_CW(KC_VOLD, KC_VOLU) },
-    [_NAV_SYM]  = { ENCODER_CCW_CW(MS_WHLR, MS_WHLL), ENCODER_CCW_CW(KC_VOLD, KC_VOLU) },
-};
+bool encoder_update_user(uint8_t index, bool clockwise) {
+    switch (index) {
+        case 0:
+            /* Left knob: sideways scroll. */
+            tap_code(clockwise ? MS_WHLR : MS_WHLL);
+            break;
+        case 1:
+            /* Right knob: volume. */
+            tap_code(clockwise ? KC_VOLU : KC_VOLD);
+            break;
+        default:
+            return true;
+    }
+    return false;
+}
 #endif
