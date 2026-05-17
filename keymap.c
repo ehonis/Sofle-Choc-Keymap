@@ -221,28 +221,14 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
 )
 };
 
-#ifdef ENCODER_ENABLE
+#if defined(ENCODER_MAP_ENABLE)
 /*
- * Split encoder handling:
- * - index 0 => left encoder
- * - index 1 => right encoder
- *
- * This is routed by QMK split transport, so behavior stays consistent regardless
- * of which half is currently USB master.
+ * Both rotary encoders control system volume only (no scroll / page keys).
+ * ENCODER_CCW_CW(ccw, cw): turn one way = quieter, the other = louder.
+ * Same mapping on every layer so knobs always behave the same.
  */
-bool encoder_update_user(uint8_t index, bool clockwise) {
-    switch (index) {
-        case 0:
-            /* Left knob: sideways scroll. */
-            tap_code(clockwise ? MS_WHLR : MS_WHLL);
-            break;
-        case 1:
-            /* Right knob: volume. */
-            tap_code(clockwise ? KC_VOLU : KC_VOLD);
-            break;
-        default:
-            return true;
-    }
-    return false;
-}
+const uint16_t PROGMEM encoder_map[][NUM_ENCODERS][NUM_DIRECTIONS] = {
+    [_BASE]    = { ENCODER_CCW_CW(KC_VOLD, KC_VOLU), ENCODER_CCW_CW(KC_VOLD, KC_VOLU) },
+    [_NAV_SYM] = { ENCODER_CCW_CW(KC_VOLD, KC_VOLU), ENCODER_CCW_CW(KC_VOLD, KC_VOLU) },
+};
 #endif
