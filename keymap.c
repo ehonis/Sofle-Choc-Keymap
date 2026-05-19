@@ -7,8 +7,33 @@
 #    include "rgb_matrix.h"
 #endif
 
-/* Layer aliases keep the keymap readable and match your labels. */
-enum sofle_layers { _BASE = 0, _NAV_SYM = 1 };
+/*
+ * Layer order matters: nav MUST be the highest layer number.
+ * QMK resolves keys from the highest active layer downward. If _BASE_WIN sat above
+ * _NAV_SYM, holding MO(_NAV_SYM) on Windows would still show the Win base keys.
+ *
+ * Stack examples:
+ *   Mac typing:  layer 0
+ *   Mac + nav:   layers 0 + 2  → highest 2 (_NAV_SYM)
+ *   Win typing:  layer 1
+ *   Win + nav:   layers 1 + 2  → highest 2 (_NAV_SYM)
+ */
+enum sofle_layers { _BASE = 0, _BASE_WIN = 1, _NAV_SYM = 2 };
+
+/*
+ * Profile = is the _BASE_WIN bit set in the (split-synced) layer_state.
+ *
+ *   Mac:        layer_state = 0b001       (default layer 0 only)
+ *   Win:        layer_state = 0b011       (default 0 + _BASE_WIN toggled on)
+ *   Mac + nav:  layer_state = 0b101
+ *   Win + nav:  layer_state = 0b111
+ *
+ * Because SPLIT_LAYER_STATE_ENABLE is set in config.h, both halves see the same
+ * layer_state, so both OLEDs render the same icon.
+ */
+static bool is_windows_profile_active(void) {
+    return (layer_state & (1UL << _BASE_WIN)) != 0;
+}
 
 /*
  * Split boards: only the USB-connected half is "master" for RGB. The other half's `rgb_matrix_config`
@@ -29,12 +54,17 @@ static void set_layer_rgb(layer_state_t state) {
     rgb_matrix_mode_noeeprom(RGB_MATRIX_SOLID_COLOR);
     switch (get_highest_layer(state)) {
         case _NAV_SYM:
-            /* Layer 1: cyan so nav layer is visually distinct. */
+            /* Nav overlay: cyan so it's visually obvious you're on the nav layer. */
             rgb_matrix_sethsv_noeeprom(128, 255, 180);
+            break;
+        case _BASE_WIN:
+            /* Windows profile base: red. HSV hue 0 + max saturation + max value.
+             * Brightness is globally capped by RGB_MATRIX_MAXIMUM_BRIGHTNESS in config.h. */
+            rgb_matrix_sethsv_noeeprom(0, 255, 255);
             break;
         case _BASE:
         default:
-            /* Layer 0: white as the normal typing layer. */
+            /* Mac profile base: white (sat 0 = no color). */
             rgb_matrix_sethsv_noeeprom(0, 0, 255);
             break;
     }
@@ -57,6 +87,14 @@ layer_state_t layer_state_set_user(layer_state_t state) {
 #endif
     return state;
 }
+
+/*
+ * Profile switching is just `TG(_BASE_WIN)` on the nav layer — see keymap below.
+ * TG flips the _BASE_WIN layer bit on/off, which:
+ *   - Mac (off) → Windows (on): layer_state gets bit 1 set, _BASE_WIN keys win over _BASE
+ *   - Windows (on) → Mac (off): bit 1 cleared, _BASE keys are top of stack again
+ * No custom keycode handler needed — QMK + split_layer_state do the rest.
+ */
 
 #ifdef OLED_ENABLE
 /*
@@ -105,6 +143,94 @@ static void draw_seg(uint8_t x, uint8_t y, uint8_t w, uint8_t h) {
  * - total width  = 13 px
  * - total height = 23 px
  */
+/*
+ * 16×16 profile icons in flash (PROGMEM). One uint16_t per row; bit 15 (MSB) is the
+ * leftmost pixel (col 0), bit 0 (LSB) is the rightmost (col 15).
+ *
+ * Apple logo (each '.' is off, 'X' is on):
+ *   col:    0123456789012345
+ *   R0      ................   blank top margin
+ *   R1      ..........X.....   leaf tip (single pixel poking up)
+ *   R2      .........XXX....   leaf curl
+ *   R3      ........XX......   leaf attaching to body
+ *   R4      ....XXXXX.XX....   top of body with bite cutout on the right
+ *   R5      ...XXXXXXX.XX...   bite narrowing
+ *   R6      ..XXXXXXXXX.XX..   bite almost closed
+ *   R7      ..XXXXXXXXXXXXX.   widest row (bite finished)
+ *   R8-R11  ..XXXXXXXXXXXXX.   solid body, 13 px wide
+ *   R12     ...XXXXXXXXXXX..
+ *   R13     ....XXXXXXXXX...
+ *   R14     ....XXX...XXX...   classic two-foot split at bottom
+ *   R15     ................   blank bottom margin
+ *
+ * Mapping each lit column to a bit:  bit = 15 - col
+ *   e.g. R1 col 10 -> bit 5  -> 0x0020
+ *        R4 cols 4..8 + 10,11 -> bits 11,10,9,8,7 + 5,4 -> 0x0FB0
+ */
+static const uint16_t PROGMEM icon_mac[16] = {
+    0x0000,  /* R0   ................ */
+    0x0020,  /* R1   ..........X..... */
+    0x0070,  /* R2   .........XXX.... */
+    0x00C0,  /* R3   ........XX...... */
+    0x0FB0,  /* R4   ....XXXXX.XX.... */
+    0x1FD8,  /* R5   ...XXXXXXX.XX... */
+    0x3FEC,  /* R6   ..XXXXXXXXX.XX.. */
+    0x3FFE,  /* R7   ..XXXXXXXXXXXXX. */
+    0x3FFE,  /* R8   ..XXXXXXXXXXXXX. */
+    0x3FFE,  /* R9   ..XXXXXXXXXXXXX. */
+    0x3FFE,  /* R10  ..XXXXXXXXXXXXX. */
+    0x3FFE,  /* R11  ..XXXXXXXXXXXXX. */
+    0x1FFC,  /* R12  ...XXXXXXXXXXX.. */
+    0x0FF8,  /* R13  ....XXXXXXXXX... */
+    0x0E38,  /* R14  ....XXX...XXX... */
+    0x0000,  /* R15  ................ */
+};
+
+/*
+ * Windows logo — four equal square panes in a 2×2 grid, separated by 1-pixel gaps.
+ * Pane size: 5 cols × 4 rows each.
+ *   Left panes:  cols 1-5
+ *   Col gap:     col 6
+ *   Right panes: cols 7-11
+ *   Top panes:   rows 3-6   (0x7DF0 = 0111 1101 1111 0000)
+ *   Row gap:     row 7
+ *   Bottom panes:rows 8-11
+ */
+static const uint16_t PROGMEM icon_win[16] = {
+    0x0000,  /* R0  empty */
+    0x0000,  /* R1  empty */
+    0x0000,  /* R2  empty */
+    0x7DF0,  /* R3  top panes    .XXXXX.XXXXX.... */
+    0x7DF0,  /* R4  top panes                     */
+    0x7DF0,  /* R5  top panes                     */
+    0x7DF0,  /* R6  top panes                     */
+    0x0000,  /* R7  row gap                       */
+    0x7DF0,  /* R8  bottom panes .XXXXX.XXXXX.... */
+    0x7DF0,  /* R9  bottom panes                  */
+    0x7DF0,  /* R10 bottom panes                  */
+    0x7DF0,  /* R11 bottom panes                  */
+    0x0000,  /* R12 empty */
+    0x0000,  /* R13 empty */
+    0x0000,  /* R14 empty */
+    0x0000,  /* R15 empty */
+};
+
+/*
+ * Blit one 16×16 icon to the OLED framebuffer.
+ * `ox`,`oy` = top-left corner in the rotated portrait coordinate space (32 w × 128 h).
+ * Bit 15 of each row word maps to the leftmost pixel (col 0 offset from ox).
+ */
+static void draw_profile_icon(uint8_t ox, uint8_t oy, const uint16_t *icon) {
+    for (uint8_t row = 0; row < 16; row++) {
+        uint16_t bits = pgm_read_word(&icon[row]);
+        for (uint8_t col = 0; col < 16; col++) {
+            if (bits & (0x8000 >> col)) {
+                oled_write_pixel((uint8_t)(ox + col), (uint8_t)(oy + row), true);
+            }
+        }
+    }
+}
+
 static void draw_big_digit(uint8_t x, uint8_t y, uint8_t digit) {
     static const uint8_t segmask[10] = {
         /*0*/ 0b00111111, /* a b c d e f */
@@ -155,12 +281,25 @@ bool oled_task_user(void) {
     uint8_t tens = (uint8_t)(val / 10);
     uint8_t ones = (uint8_t)(val % 10);
 
-    /* Portrait canvas here is 32w x 128h. Center two 13px digits with 2px gap. */
+    /* Portrait canvas: 32 w × 128 h. Center two 13-px digits with a 2-px gap between them. */
     const uint8_t digit_w = 13;
     const uint8_t gap     = 2;
-    const uint8_t total_w = (uint8_t)(digit_w * 2 + gap); /* 28 */
-    const uint8_t start_x = (uint8_t)((32 - total_w) / 2); /* centered -> 2 */
-    const uint8_t start_y = (uint8_t)((128 - 23) / 2);     /* vertically centered -> 52 */
+    const uint8_t total_w = (uint8_t)(digit_w * 2 + gap); /* 28 px total */
+    const uint8_t start_x = (uint8_t)((32 - total_w) / 2); /* x = 2, horizontally centered */
+    const uint8_t start_y = (uint8_t)((128 - 23) / 2);     /* y = 52, vertically centered */
+
+    /*
+     * OS profile badge: flush to the bottom-right corner of the 32×128 canvas.
+     * Icon is 16×16 px → top-left at (16, 112) so it sits at pixel columns 16-31
+     * and pixel rows 112-127.
+     */
+    const uint8_t icon_x = 32 - 16; /* = 16 */
+    const uint8_t icon_y = 128 - 16; /* = 112 */
+    if (is_windows_profile_active()) {
+        draw_profile_icon(icon_x, icon_y, icon_win);
+    } else {
+        draw_profile_icon(icon_x, icon_y, icon_mac);
+    }
 
     /*
      * Keep the leading zero for readability at a glance (e.g. "07").
@@ -204,6 +343,19 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
 ),
 
 /*
+ * Windows profile — same as _BASE except left thumb outer/inner swap:
+ * Mac thumb order (outer→inner): Ctrl  Alt  Gui  |  Win: Gui  Alt  Ctrl
+ * So copy/paste on Windows uses Ctrl on the thumb where Mac used Gui.
+ */
+[_BASE_WIN] = LAYOUT(
+    KC_ESC,   KC_1, KC_2, KC_3, KC_4, KC_5,                                KC_6, KC_7, KC_8,    KC_9, KC_0,    KC_GRV,
+    KC_TAB,   KC_Q, KC_W, KC_E, KC_R, KC_T,                                KC_Y, KC_U, KC_I,    KC_O, KC_P,    KC_BSLS,
+    KC_LCTL, KC_A, KC_S, KC_D, KC_F, KC_G,                                KC_H, KC_J, KC_K,    KC_L, KC_SCLN, KC_QUOT,
+    KC_LSFT,  KC_Z, KC_X, KC_C, KC_V, KC_B, KC_VOLU, KC_VOLU,              KC_N, KC_M, KC_COMM, KC_DOT, KC_SLSH, KC_RSFT,
+              KC_LGUI, KC_LALT, KC_LCTL, MO(_NAV_SYM), KC_SPC,                  KC_ENT, KC_BSPC, KC_LGUI, KC_LALT, KC_RCTL
+),
+
+/*
  * Layer 1:
  * - Homerow navigation cluster:
  *   - D = Up, F = Down
@@ -213,11 +365,11 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
  * Left Shift is kept on this layer so shifted arrows/symbols still work while held.
  */
 [_NAV_SYM] = LAYOUT(
-    KC_NO, KC_NO, KC_NO, KC_UP,   KC_NO, KC_NO,                   KC_LEFT, KC_RIGHT, KC_DOWN, KC_LCBR, KC_RCBR, KC_NO,
-    KC_NO, KC_NO, KC_NO, KC_NO,   KC_NO, KC_NO,                   KC_NO,   KC_NO,    KC_NO,   KC_NO,   KC_NO,   KC_NO,
+    TG(_BASE_WIN), KC_NO, KC_NO, KC_UP,   KC_NO, KC_NO,               KC_LEFT, KC_RIGHT, KC_DOWN, KC_LCBR, KC_RCBR, KC_NO,
+    KC_NO, KC_NO, KC_NO, KC_NO,   KC_NO, KC_NO,                       KC_NO,   KC_NO,    KC_NO,   KC_NO,   KC_NO,   KC_NO,
     KC_LALT, KC_LALT, KC_NO, KC_UP,   KC_DOWN, KC_NO,                 KC_NO,   KC_LEFT,  KC_RGHT, KC_MINS, KC_PLUS, KC_NO,
-    KC_LSFT, KC_NO, KC_NO, KC_NO, KC_NO, KC_NO, KC_MUTE, KC_NO,   KC_NO,   KC_NO,    KC_NO,   KC_NO,   KC_NO,   KC_NO,
-           KC_NO, KC_NO, KC_NO, KC_NO, KC_NO,                  KC_LALT, KC_BSPC, KC_NO, KC_NO, KC_NO
+    KC_LSFT, KC_NO, KC_NO, KC_NO, KC_NO, KC_NO, KC_MUTE,           KC_NO,  KC_NO,   KC_NO,    KC_NO,   KC_NO,   KC_NO,   KC_NO,
+           KC_NO, KC_NO, KC_NO, KC_NO, KC_NO,                    KC_LALT, KC_BSPC, KC_NO, KC_NO, KC_NO
 )
 };
 
@@ -228,7 +380,8 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
  * Same mapping on every layer so knobs always behave the same.
  */
 const uint16_t PROGMEM encoder_map[][NUM_ENCODERS][NUM_DIRECTIONS] = {
-    [_BASE]    = { ENCODER_CCW_CW(KC_VOLD, KC_VOLU), ENCODER_CCW_CW(KC_VOLD, KC_VOLU) },
-    [_NAV_SYM] = { ENCODER_CCW_CW(KC_VOLD, KC_VOLU), ENCODER_CCW_CW(KC_VOLD, KC_VOLU) },
+    [_BASE]     = { ENCODER_CCW_CW(KC_VOLD, KC_VOLU), ENCODER_CCW_CW(KC_VOLD, KC_VOLU) },
+    [_NAV_SYM]  = { ENCODER_CCW_CW(KC_VOLD, KC_VOLU), ENCODER_CCW_CW(KC_VOLD, KC_VOLU) },
+    [_BASE_WIN] = { ENCODER_CCW_CW(KC_VOLD, KC_VOLU), ENCODER_CCW_CW(KC_VOLD, KC_VOLU) },
 };
 #endif

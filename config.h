@@ -23,6 +23,9 @@
  */
 #define SPLIT_WPM_ENABLE
 
+/* Keep Mac/Win base layer and nav overlay identical on both halves. */
+#define SPLIT_LAYER_STATE_ENABLE
+
 /*
  * OLED pulls meaningful current at default “255” brightness. QMK defaults to 255 unless overridden;
  * 255 is brightest; lowering this saves a little panel current — change this if readability suffers.
