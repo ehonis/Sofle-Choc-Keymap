@@ -8,25 +8,27 @@
 #endif
 
 /*
- * Layer order matters: nav MUST be the highest layer number.
- * QMK resolves keys from the highest active layer downward. If _BASE_WIN sat above
- * _NAV_SYM, holding MO(_NAV_SYM) on Windows would still show the Win base keys.
+ * Layer order matters: nav overlays MUST be the highest layer numbers.
+ * QMK resolves keys from the highest active layer downward.
+ *
+ * _NAV_SYM and _NAV_SYM_WIN are separate so Windows can use LCTL (not LALT) for
+ * word/line navigation and F1–F10 on the number row while Mac/Linux keep LALT.
  *
  * Stack examples:
- *   Mac typing:  layer 0
- *   Mac + nav:   layers 0 + 2  → highest 2 (_NAV_SYM)
- *   Win typing:  layer 1
- *   Win + nav:   layers 1 + 2  → highest 2 (_NAV_SYM)
+ *   Mac typing:     layer 0
+ *   Mac + nav:      layers 0 + 2  → highest 2 (_NAV_SYM)
+ *   Win typing:     layer 1
+ *   Win + nav:      layers 1 + 3  → highest 3 (_NAV_SYM_WIN)
  */
-enum sofle_layers { _BASE = 0, _BASE_WIN = 1, _NAV_SYM = 2 };
+enum sofle_layers { _BASE = 0, _BASE_WIN = 1, _NAV_SYM = 2, _NAV_SYM_WIN = 3 };
 
 /*
  * Profile = is the _BASE_WIN bit set in the (split-synced) layer_state.
  *
  *   Mac:        layer_state = 0b001       (default layer 0 only)
  *   Win:        layer_state = 0b011       (default 0 + _BASE_WIN toggled on)
- *   Mac + nav:  layer_state = 0b101
- *   Win + nav:  layer_state = 0b111
+ *   Mac + nav:  layer_state = 0b101  (+ MO(_NAV_SYM))
+ *   Win + nav:  layer_state = 0b1011 (+ MO(_NAV_SYM_WIN))
  *
  * Because SPLIT_LAYER_STATE_ENABLE is set in config.h, both halves see the same
  * layer_state, so both OLEDs render the same icon.
@@ -54,7 +56,8 @@ static void set_layer_rgb(layer_state_t state) {
     rgb_matrix_mode_noeeprom(RGB_MATRIX_SOLID_COLOR);
     switch (get_highest_layer(state)) {
         case _NAV_SYM:
-            /* Nav overlay: cyan so it's visually obvious you're on the nav layer. */
+        case _NAV_SYM_WIN:
+            /* Nav overlay: cyan so it's visually obvious you're on a nav layer. */
             rgb_matrix_sethsv_noeeprom(128, 255, 180);
             break;
         case _BASE_WIN:
@@ -352,17 +355,15 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
     KC_TAB,   KC_Q, KC_W, KC_E, KC_R, KC_T,                                KC_Y, KC_U, KC_I,    KC_O, KC_P,    KC_BSLS,
     KC_LCTL, KC_A, KC_S, KC_D, KC_F, KC_G,                                KC_H, KC_J, KC_K,    KC_L, KC_SCLN, KC_QUOT,
     KC_LSFT,  KC_Z, KC_X, KC_C, KC_V, KC_B, KC_VOLU, KC_VOLU,              KC_N, KC_M, KC_COMM, KC_DOT, KC_SLSH, KC_RSFT,
-              KC_LGUI, KC_LALT, KC_LCTL, MO(_NAV_SYM), KC_SPC,                  KC_ENT, KC_BSPC, KC_LGUI, KC_LALT, KC_RCTL
+              KC_LGUI, KC_LALT, KC_LCTL, MO(_NAV_SYM_WIN), KC_SPC,                  KC_ENT, KC_BSPC, KC_LGUI, KC_LALT, KC_RCTL
 ),
 
 /*
- * Layer 1:
- * - Homerow navigation cluster:
- *   - D = Up, F = Down
- *   - J = Left, K = Right
- * - L = '-', ; = '+'
- * KC_NO disables all other keys so this layer only does what you mapped intentionally.
- * Left Shift is kept on this layer so shifted arrows/symbols still work while held.
+ * Mac / Linux nav overlay (_NAV_SYM):
+ * - TG(_BASE_WIN) top-left toggles the Windows profile (tap while holding nav).
+ * - Homerow nav uses LALT so Option+arrows match macOS word/line movement.
+ * - D/F = Up/Down, J/K = Left/Right; L/; = -/+
+ * KC_NO everywhere else so accidental keys do nothing.
  */
 [_NAV_SYM] = LAYOUT(
     TG(_BASE_WIN), KC_NO, KC_NO, KC_UP,   KC_NO, KC_NO,               KC_LEFT, KC_RIGHT, KC_DOWN, KC_LCBR, KC_RCBR, KC_NO,
@@ -370,6 +371,21 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
     KC_LALT, KC_LALT, KC_NO, KC_UP,   KC_DOWN, KC_NO,                 KC_NO,   KC_LEFT,  KC_RGHT, KC_MINS, KC_PLUS, KC_NO,
     KC_LSFT, KC_NO, KC_NO, KC_NO, KC_NO, KC_NO, KC_MUTE,           KC_NO,  KC_NO,   KC_NO,    KC_NO,   KC_NO,   KC_NO,   KC_NO,
            KC_NO, KC_NO, KC_NO, KC_NO, KC_NO,                    KC_LALT, KC_BSPC, KC_NO, KC_NO, KC_NO
+),
+
+/*
+ * Windows nav overlay (_NAV_SYM_WIN):
+ * - Same homerow arrow positions as _NAV_SYM, but LCTL replaces LALT so Ctrl+arrows
+ *   match Windows word/paragraph navigation (same finger positions as Mac Option+arrows).
+ * - Number row 1–0 → F1–F10; ` → F11; Tab → F12; H → Ctrl+Alt+Del.
+ * - TG(_BASE_WIN) top-left switches back to Mac/Linux profile.
+ */
+[_NAV_SYM_WIN] = LAYOUT(
+    TG(_BASE_WIN), KC_F1, KC_F2, KC_F3, KC_F4, KC_F5,               KC_F6, KC_F7, KC_F8, KC_F9, KC_F10, KC_F11,
+    KC_F12, KC_NO, KC_NO, KC_NO,   KC_NO, KC_NO,                   C(A(KC_DEL)), KC_NO,    KC_NO,   KC_NO,   KC_NO,   KC_NO,
+    KC_LCTL, KC_LCTL, KC_NO, KC_UP,   KC_DOWN, KC_NO,                 KC_NO,   KC_LEFT,  KC_RGHT, KC_MINS, KC_PLUS, KC_NO,
+    KC_LSFT, KC_NO, KC_NO, KC_NO, KC_NO, KC_NO, KC_MUTE,           KC_NO,  KC_NO,   KC_NO,    KC_NO,   KC_NO,   KC_NO,   KC_NO,
+           KC_NO, KC_NO, KC_NO, KC_NO, KC_NO,                    KC_LCTL, KC_BSPC, KC_NO, KC_NO, KC_NO
 )
 };
 
@@ -380,8 +396,9 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
  * Same mapping on every layer so knobs always behave the same.
  */
 const uint16_t PROGMEM encoder_map[][NUM_ENCODERS][NUM_DIRECTIONS] = {
-    [_BASE]     = { ENCODER_CCW_CW(KC_VOLD, KC_VOLU), ENCODER_CCW_CW(KC_VOLD, KC_VOLU) },
-    [_NAV_SYM]  = { ENCODER_CCW_CW(KC_VOLD, KC_VOLU), ENCODER_CCW_CW(KC_VOLD, KC_VOLU) },
-    [_BASE_WIN] = { ENCODER_CCW_CW(KC_VOLD, KC_VOLU), ENCODER_CCW_CW(KC_VOLD, KC_VOLU) },
+    [_BASE]        = { ENCODER_CCW_CW(KC_VOLD, KC_VOLU), ENCODER_CCW_CW(KC_VOLD, KC_VOLU) },
+    [_NAV_SYM]     = { ENCODER_CCW_CW(KC_VOLD, KC_VOLU), ENCODER_CCW_CW(KC_VOLD, KC_VOLU) },
+    [_NAV_SYM_WIN] = { ENCODER_CCW_CW(KC_VOLD, KC_VOLU), ENCODER_CCW_CW(KC_VOLD, KC_VOLU) },
+    [_BASE_WIN]    = { ENCODER_CCW_CW(KC_VOLD, KC_VOLU), ENCODER_CCW_CW(KC_VOLD, KC_VOLU) },
 };
 #endif
