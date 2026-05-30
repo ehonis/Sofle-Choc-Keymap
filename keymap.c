@@ -23,6 +23,15 @@
 enum sofle_layers { _BASE = 0, _BASE_WIN = 1, _NAV_SYM = 2, _NAV_SYM_WIN = 3 };
 
 /*
+ * Nav-layer keys where raw QMK aliases misbehave (always emit the shifted char).
+ *
+ * PLU_EQ  — `=` unshifted, `+` with Shift  (KC_PLUS / KC_EQL)
+ * LBR_BRC — `[` unshifted, `{` with Shift  (KC_LCBR is Shift+LBRC only)
+ * RBR_BRC — `]` unshifted, `}` with Shift  (KC_RCBR is Shift+RBRC only)
+ */
+enum custom_keycodes { PLU_EQ = SAFE_RANGE, LBR_BRC, RBR_BRC };
+
+/*
  * Profile = is the _BASE_WIN bit set in the (split-synced) layer_state.
  *
  *   Mac:        layer_state = 0b001       (default layer 0 only)
@@ -316,6 +325,41 @@ bool oled_task_user(void) {
 
 #endif /* OLED_ENABLE */
 
+/*
+ * Tap a US-layout key as unshifted or Shift+key, stripping held Shift first so
+ * layer/thumb shift does not force the shifted symbol every time (same fix as PLU_EQ).
+ */
+static void tap_us_key_shifted(uint16_t keycode) {
+    if (mod_config(get_mods()) & MOD_MASK_SHIFT) {
+        uint8_t mods = get_mods();
+        del_mods(MOD_MASK_SHIFT);
+        tap_code16(S(keycode));
+        set_mods(mods);
+    } else {
+        tap_code16(keycode);
+    }
+}
+
+bool process_record_user(uint16_t keycode, keyrecord_t *record) {
+    if (!record->event.pressed) {
+        return true;
+    }
+
+    switch (keycode) {
+        case PLU_EQ:
+            tap_us_key_shifted(KC_EQL);
+            return false;
+        case LBR_BRC:
+            tap_us_key_shifted(KC_LBRC);
+            return false;
+        case RBR_BRC:
+            tap_us_key_shifted(KC_RBRC);
+            return false;
+    }
+
+    return true;
+}
+
 const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
 /*
  * Layer 0 (base) - from your screenshots
@@ -366,9 +410,9 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
  * KC_NO everywhere else so accidental keys do nothing.
  */
 [_NAV_SYM] = LAYOUT(
-    TG(_BASE_WIN), KC_NO, KC_NO, KC_UP,   KC_NO, KC_NO,               KC_LEFT, KC_RIGHT, KC_DOWN, KC_LCBR, KC_RCBR, KC_NO,
+    TG(_BASE_WIN), KC_NO, KC_NO, KC_UP,   KC_NO, KC_NO,               KC_LEFT, KC_RIGHT, KC_DOWN, LBR_BRC, RBR_BRC, KC_NO,
     KC_NO, KC_NO, KC_NO, KC_NO,   KC_NO, KC_NO,                       KC_NO,   KC_NO,    KC_NO,   KC_NO,   KC_NO,   KC_NO,
-    KC_LALT, KC_LALT, KC_NO, KC_UP,   KC_DOWN, KC_NO,                 KC_NO,   KC_LEFT,  KC_RGHT, KC_MINS, KC_PLUS, KC_NO,
+    KC_LALT, KC_LALT, KC_NO, KC_UP,   KC_DOWN, KC_NO,                 KC_NO,   KC_LEFT,  KC_RGHT, KC_MINS, PLU_EQ,  KC_NO,
     KC_LSFT, KC_NO, KC_NO, KC_NO, KC_NO, KC_NO, KC_MUTE,           KC_NO,  KC_NO,   KC_NO,    KC_NO,   KC_NO,   KC_NO,   KC_NO,
            KC_NO, KC_NO, KC_NO, KC_NO, KC_NO,                    KC_LALT, KC_BSPC, KC_NO, KC_NO, KC_NO
 ),
@@ -377,13 +421,15 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
  * Windows nav overlay (_NAV_SYM_WIN):
  * - Same homerow arrow positions as _NAV_SYM, but LCTL replaces LALT so Ctrl+arrows
  *   match Windows word/paragraph navigation (same finger positions as Mac Option+arrows).
- * - Number row 1–0 → F1–F10; ` → F11; Tab → F12; H → Ctrl+Alt+Del.
+ * - Number row 1–8 → F1–F8; 9/0 slots → [ ] / { } (LBR_BRC/RBR_BRC); ` → F11; Tab → F12.
+ * - Row 1 right: F9, F10 (moved down from the old number-row positions).
+ * - H → Ctrl+Alt+Del.
  * - TG(_BASE_WIN) top-left switches back to Mac/Linux profile.
  */
 [_NAV_SYM_WIN] = LAYOUT(
-    TG(_BASE_WIN), KC_F1, KC_F2, KC_F3, KC_F4, KC_F5,               KC_F6, KC_F7, KC_F8, KC_F9, KC_F10, KC_F11,
-    KC_F12, KC_NO, KC_NO, KC_NO,   KC_NO, KC_NO,                   C(A(KC_DEL)), KC_NO,    KC_NO,   KC_NO,   KC_NO,   KC_NO,
-    KC_LCTL, KC_LCTL, KC_NO, KC_UP,   KC_DOWN, KC_NO,                 KC_NO,   KC_LEFT,  KC_RGHT, KC_MINS, KC_PLUS, KC_NO,
+    TG(_BASE_WIN), KC_F1, KC_F2, KC_F3, KC_F4, KC_F5,               KC_F6, KC_F7, KC_F8, LBR_BRC, RBR_BRC, KC_F11,
+    KC_F12, KC_NO, KC_NO, KC_NO,   KC_NO, KC_NO,                   C(A(KC_DEL)), KC_NO,    KC_NO,   KC_F9,   KC_F10,  KC_NO,
+    KC_LCTL, KC_LCTL, KC_NO, KC_UP,   KC_DOWN, KC_NO,                 KC_NO,   KC_LEFT,  KC_RGHT, KC_MINS, PLU_EQ,  KC_NO,
     KC_LSFT, KC_NO, KC_NO, KC_NO, KC_NO, KC_NO, KC_MUTE,           KC_NO,  KC_NO,   KC_NO,    KC_NO,   KC_NO,   KC_NO,   KC_NO,
            KC_NO, KC_NO, KC_NO, KC_NO, KC_NO,                    KC_LCTL, KC_BSPC, KC_NO, KC_NO, KC_NO
 )
