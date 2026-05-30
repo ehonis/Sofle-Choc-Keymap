@@ -414,7 +414,7 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
     KC_NO, KC_NO, KC_NO, KC_NO,   KC_NO, KC_NO,                       KC_NO,   KC_NO,    KC_NO,   KC_NO,   KC_NO,   KC_NO,
     KC_LALT, KC_LALT, KC_NO, KC_UP,   KC_DOWN, KC_NO,                 KC_NO,   KC_LEFT,  KC_RGHT, KC_MINS, PLU_EQ,  KC_NO,
     KC_LSFT, KC_NO, KC_NO, KC_NO, KC_NO, KC_NO, KC_MUTE,           KC_NO,  KC_NO,   KC_NO,    KC_NO,   KC_NO,   KC_NO,   KC_NO,
-           KC_NO, KC_NO, KC_NO, KC_NO, KC_NO,                    KC_LALT, KC_BSPC, KC_NO, KC_NO, KC_NO
+           KC_NO, KC_NO, KC_LGUI, KC_NO, KC_SPC,                    KC_LALT, KC_BSPC, KC_NO, KC_NO, KC_NO
 ),
 
 /*
@@ -431,7 +431,7 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
     KC_F12, KC_NO, KC_NO, KC_NO,   KC_NO, KC_NO,                   C(A(KC_DEL)), KC_NO,    KC_NO,   KC_F9,   KC_F10,  KC_NO,
     KC_LCTL, KC_LCTL, KC_NO, KC_UP,   KC_DOWN, KC_NO,                 KC_NO,   KC_LEFT,  KC_RGHT, KC_MINS, PLU_EQ,  KC_NO,
     KC_LSFT, KC_NO, KC_NO, KC_NO, KC_NO, KC_NO, KC_MUTE,           KC_NO,  KC_NO,   KC_NO,    KC_NO,   KC_NO,   KC_NO,   KC_NO,
-           KC_NO, KC_NO, KC_NO, KC_NO, KC_NO,                    KC_LCTL, KC_BSPC, KC_NO, KC_NO, KC_NO
+           KC_NO, KC_NO, KC_LCTL, KC_NO, KC_SPC,                    KC_LCTL, KC_BSPC, KC_NO, KC_NO, KC_NO
 )
 };
 
