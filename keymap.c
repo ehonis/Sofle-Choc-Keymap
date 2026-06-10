@@ -12,7 +12,8 @@
  * QMK resolves keys from the highest active layer downward.
  *
  * _NAV_SYM and _NAV_SYM_WIN are separate so Windows can use LCTL (not LALT) for
- * word/line navigation and F1–F10 on the number row while Mac/Linux keep LALT.
+ * word/line navigation while Mac/Linux keep LALT; both share F1–F10 on the left
+ * and right-hand I/J/K/L arrows.
  *
  * Stack examples:
  *   Mac typing:     layer 0
@@ -386,7 +387,7 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
     KC_TAB,   KC_Q, KC_W, KC_E, KC_R, KC_T,                                KC_Y, KC_U, KC_I,    KC_O, KC_P,    KC_BSLS,
     KC_LCTL, KC_A, KC_S, KC_D, KC_F, KC_G,                                KC_H, KC_J, KC_K,    KC_L, KC_SCLN, KC_QUOT,
     KC_LSFT,  KC_Z, KC_X, KC_C, KC_V, KC_B, KC_VOLU, KC_VOLU,              KC_N, KC_M, KC_COMM, KC_DOT, KC_SLSH, KC_RSFT,
-              KC_LCTL, KC_LALT, KC_LGUI, MO(_NAV_SYM), KC_SPC,                  KC_ENT, KC_BSPC, KC_LGUI, KC_LALT, KC_RCTL
+              KC_LCTL, KC_LALT, KC_LGUI, MO(_NAV_SYM), KC_SPC,                  KC_ENT, KC_BSPC, KC_LALT, KC_LGUI, KC_RCTL
 ),
 
 /*
@@ -399,37 +400,38 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
     KC_TAB,   KC_Q, KC_W, KC_E, KC_R, KC_T,                                KC_Y, KC_U, KC_I,    KC_O, KC_P,    KC_BSLS,
     KC_LCTL, KC_A, KC_S, KC_D, KC_F, KC_G,                                KC_H, KC_J, KC_K,    KC_L, KC_SCLN, KC_QUOT,
     KC_LSFT,  KC_Z, KC_X, KC_C, KC_V, KC_B, KC_VOLU, KC_VOLU,              KC_N, KC_M, KC_COMM, KC_DOT, KC_SLSH, KC_RSFT,
-              KC_LGUI, KC_LALT, KC_LCTL, MO(_NAV_SYM_WIN), KC_SPC,                  KC_ENT, KC_BSPC, KC_LGUI, KC_LALT, KC_RCTL
+              KC_LGUI, KC_LALT, KC_LCTL, MO(_NAV_SYM_WIN), KC_SPC,                  KC_ENT, KC_BSPC, KC_LALT, KC_LGUI, KC_RCTL
 ),
 
 /*
  * Mac / Linux nav overlay (_NAV_SYM):
  * - TG(_BASE_WIN) top-left toggles the Windows profile (tap while holding nav).
- * - Homerow nav uses LALT so Option+arrows match macOS word/line movement.
- * - D/F = Up/Down, J/K = Left/Right; L/; = -/+
+ * - F1–F10 on left rows 0–1 (1–5 and Q–T); arrows on right hand only (I/J/K/L).
+ * - Homerow LALT on A/S so Option+arrows still work when combined with arrow keys.
+ * - -/+ shifted one right to ; and ' (KC_MINS / PLU_EQ).
  * KC_NO everywhere else so accidental keys do nothing.
  */
 [_NAV_SYM] = LAYOUT(
-    TG(_BASE_WIN), KC_NO, KC_NO, KC_UP,   KC_NO, KC_NO,               KC_LEFT, KC_RIGHT, KC_DOWN, LBR_BRC, RBR_BRC, KC_NO,
-    KC_NO, KC_NO, KC_NO, KC_NO,   KC_NO, KC_NO,                       KC_NO,   KC_NO,    KC_NO,   KC_NO,   KC_NO,   KC_NO,
-    KC_LALT, KC_LALT, KC_NO, KC_UP,   KC_DOWN, KC_NO,                 KC_NO,   KC_LEFT,  KC_RGHT, KC_MINS, PLU_EQ,  KC_NO,
+    TG(_BASE_WIN), KC_F1, KC_F2, KC_F3, KC_F4, KC_F5,               KC_NO, KC_NO, KC_NO, LBR_BRC, RBR_BRC, KC_NO,
+    KC_NO, KC_F6, KC_F7, KC_F8, KC_F9, KC_F10,                      KC_NO, KC_NO, KC_UP,   KC_NO,   KC_NO,   KC_NO,
+    KC_LALT, KC_LALT, KC_NO, KC_NO, KC_NO, KC_NO,                   KC_NO, KC_LEFT, KC_DOWN, KC_RGHT, KC_MINS, PLU_EQ,
     KC_LSFT, KC_NO, KC_NO, KC_NO, KC_NO, KC_NO, KC_MUTE,           KC_NO,  KC_NO,   KC_NO,    KC_NO,   KC_NO,   KC_NO,   KC_NO,
            KC_NO, KC_NO, KC_LGUI, KC_NO, KC_SPC,                    KC_LALT, KC_BSPC, KC_NO, KC_NO, KC_NO
 ),
 
 /*
  * Windows nav overlay (_NAV_SYM_WIN):
- * - Same homerow arrow positions as _NAV_SYM, but LCTL replaces LALT so Ctrl+arrows
- *   match Windows word/paragraph navigation (same finger positions as Mac Option+arrows).
- * - Number row 1–8 → F1–F8; 9/0 slots → [ ] / { } (LBR_BRC/RBR_BRC); ` → F11; Tab → F12.
- * - Row 1 right: F9, F10 (moved down from the old number-row positions).
- * - H → Ctrl+Alt+Del.
+ * - Same layout as _NAV_SYM, but LCTL replaces LALT so Ctrl+arrows match Windows
+ *   word/paragraph navigation (same finger positions as Mac Option+arrows).
+ * - F1–F10 on left rows 0–1 (1–5 and Q–T); F11 on `; Tab → F12.
+ * - Arrows on right hand only (I/J/K/L); H → Ctrl+Alt+Del.
+ * - -/+ shifted one right to ; and ' (KC_MINS / PLU_EQ).
  * - TG(_BASE_WIN) top-left switches back to Mac/Linux profile.
  */
 [_NAV_SYM_WIN] = LAYOUT(
-    TG(_BASE_WIN), KC_F1, KC_F2, KC_F3, KC_F4, KC_F5,               KC_F6, KC_F7, KC_F8, LBR_BRC, RBR_BRC, KC_F11,
-    KC_F12, KC_NO, KC_NO, KC_NO,   KC_NO, KC_NO,                   C(A(KC_DEL)), KC_NO,    KC_NO,   KC_F9,   KC_F10,  KC_NO,
-    KC_LCTL, KC_LCTL, KC_NO, KC_UP,   KC_DOWN, KC_NO,                 KC_NO,   KC_LEFT,  KC_RGHT, KC_MINS, PLU_EQ,  KC_NO,
+    TG(_BASE_WIN), KC_F1, KC_F2, KC_F3, KC_F4, KC_F5,               KC_NO, KC_NO, KC_NO, LBR_BRC, RBR_BRC, KC_F11,
+    KC_TAB, KC_F6, KC_F7, KC_F8, KC_F9, KC_F10,                    C(A(KC_DEL)), KC_NO, KC_UP,   KC_NO,   KC_NO,   KC_F12,
+    KC_LCTL, KC_LCTL, KC_NO, KC_NO, KC_NO, KC_NO,                   KC_NO, KC_LEFT, KC_DOWN, KC_RGHT, KC_MINS, PLU_EQ,
     KC_LSFT, KC_NO, KC_NO, KC_NO, KC_NO, KC_NO, KC_MUTE,           KC_NO,  KC_NO,   KC_NO,    KC_NO,   KC_NO,   KC_NO,   KC_NO,
            KC_NO, KC_NO, KC_LCTL, KC_NO, KC_SPC,                    KC_LCTL, KC_BSPC, KC_NO, KC_NO, KC_NO
 )
