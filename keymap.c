@@ -57,7 +57,13 @@ static bool is_windows_profile_active(void) {
  * forces a fresh STARTING phase.
  */
 #ifdef RGB_MATRIX_ENABLE
-/* Strong layer-specific color cue so you can instantly see base vs nav layer. */
+/*
+ * Layer color palette (HSV 0–255). Brightness is still capped by RGB_MATRIX_MAXIMUM_BRIGHTNESS.
+ *
+ *   Mac base (_BASE)           — neon light blue
+ *   Windows base (_BASE_WIN)   — deep amethyst purple
+ *   Nav overlays (_NAV_SYM*)   — white (in-between / held-nav cue)
+ */
 static void set_layer_rgb(layer_state_t state) {
     if (!is_keyboard_master()) {
         return;
@@ -67,18 +73,17 @@ static void set_layer_rgb(layer_state_t state) {
     switch (get_highest_layer(state)) {
         case _NAV_SYM:
         case _NAV_SYM_WIN:
-            /* Nav overlay: cyan so it's visually obvious you're on a nav layer. */
-            rgb_matrix_sethsv_noeeprom(128, 255, 180);
+            /* Nav overlay — white so held-nav reads as a clean “in between” state. */
+            rgb_matrix_sethsv_noeeprom(0, 0, 255);
             break;
         case _BASE_WIN:
-            /* Windows profile base: red. HSV hue 0 + max saturation + max value.
-             * Brightness is globally capped by RGB_MATRIX_MAXIMUM_BRIGHTNESS in config.h. */
-            rgb_matrix_sethsv_noeeprom(0, 255, 255);
+            /* Windows typing profile — deep amethyst purple. */
+            rgb_matrix_sethsv_noeeprom(191, 255, 255);
             break;
         case _BASE:
         default:
-            /* Mac profile base: white (sat 0 = no color). */
-            rgb_matrix_sethsv_noeeprom(0, 0, 255);
+            /* Mac typing profile — bright neon light blue. */
+            rgb_matrix_sethsv_noeeprom(128, 255, 255);
             break;
     }
 }

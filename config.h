@@ -1,18 +1,23 @@
 /* Sofle Choc — handedness / split tuning for this keymap.
  *
- * If the board “works briefly” then freezes with Pro Micro bootloader LEDs flashing, that is usually
- * a brownout reboot: powering ~58 WS2812-style LEDs plus OLED spikes current past what the onboard
- * 3.3V regulator (or skinny USB/TRRS cabling) can keep stable. Repo default warns that high RGB_MATRIX
- * limits can outright crash AVR controllers — we cap brightness and prefer a calm default effect.
- *
- * You confirmed the keyboard stays stable with OLED ribbons unplugged — so the tipping point is OLED
- * plus per-key RGB + split on the same skinny 3.3V regulator. We cap OLED contrast and RGB together;
- * if it still browns out, lower OLED_BRIGHTNESS / RGB_MATRIX_* a few more steps or use a short good
- * USB cable / powered hub (hardware path, not firmware).
+ * RGB caps were very low (38) when this ran on AVR Pro Micro + OLED to avoid brownout reboots.
+ * On RP2040 there is much more headroom — brightness is raised toward stock levels below.
+ * If the board ever resets under full white + OLED, nudge RGB_MATRIX_MAXIMUM_BRIGHTNESS down.
  */
 #pragma once
 
 #define SPLIT_USB_DETECT
+/*
+ * EE_HANDS — identical PCBs; each half must know if it is left or right.
+ *
+ * RP2040 (UF2): flash EACH half with a different bootloader target (TRRS unplugged):
+ *   Left half:  qmk flash -kb sofle_choc -km ethan_keymap -bl uf2-split-left
+ *   Right half: qmk flash -kb sofle_choc -km ethan_keymap -bl uf2-split-right
+ * (CONVERT_TO in rules.mk is picked up automatically.)
+ *
+ * Dragging the same .uf2 onto both halves leaves handedness wrong → keys feel swapped.
+ * If hands are still reversed, you flashed the wrong side with left/right — swap the commands.
+ */
 #define EE_HANDS
 #define RGB_MATRIX_SLEEP
 #define SPLIT_TRANSPORT_MIRROR
@@ -35,8 +40,8 @@
 /* Slightly slower refresh on splits — tiny savings vs hammering I2C every 50 ms on both halves. */
 #define OLED_UPDATE_INTERVAL 80
 
-/* Tight RGB budget while OLED is connected (see RGB_MATRIX_DEFAULT_* below). */
-#define RGB_MATRIX_MAXIMUM_BRIGHTNESS 38
+/* Per-key RGB ceiling (0–255). Stock QMK default is 255; 200 is bright without pegging every LED. */
+#define RGB_MATRIX_MAXIMUM_BRIGHTNESS 200
 
 /*
  * “Clear EEPROM” (QMK Toolbox, etc.) does not mean “reset LEDs to off” — it wipes stored settings, then
@@ -46,4 +51,4 @@
  * This keymap forces SOLID_* below and re-applies them in keyboard_post_init_user().
  */
 #define RGB_MATRIX_DEFAULT_MODE RGB_MATRIX_SOLID_COLOR
-#define RGB_MATRIX_DEFAULT_VAL 22
+#define RGB_MATRIX_DEFAULT_VAL 200

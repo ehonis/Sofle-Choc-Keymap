@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# Quick QMK shortcuts for ethan_keymap (home AVR Sofle vs work RP2040 Sofle).
+#
+# Usage (from anywhere):
+#   ./sofle compile
+#   ./sofle flash
+#   ./sofle compile:work
+#   ./sofle flash:work:left
+#   ./sofle flash:work:right
+#
+# Optional: add this folder to PATH to run `sofle` without ./
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+QMK_DIR="$(cd "$SCRIPT_DIR/../../../../.." && pwd)"
+
+KB="sofle_choc"
+KM="ethan_keymap"
+
+# RP2040 board in the Pro Micro socket on the work keyboard.
+# Change if you use Elite-Pi, Helios, Liatris, etc. (see QMK CONVERT_TO docs).
+WORK_CONVERT="sparkfun_pm2040"
+
+usage() {
+    cat <<EOF
+Usage: sofle <command>
+
+Home keyboard (AVR Pro Micro / Caterina):
+  compile              Build .hex
+  flash                Build and flash (double-tap reset when prompted)
+
+Work keyboard (RP2040 / UF2, TRRS unplugged per half):
+  compile:work         Build .uf2
+  flash:work:left      Flash left half (uf2-split-left)
+  flash:work:right     Flash right half (uf2-split-right)
+
+EOF
+}
+
+run_qmk() {
+    cd "$QMK_DIR"
+    qmk "$@"
+}
+
+cmd="${1:-}"
+case "$cmd" in
+    compile)
+        run_qmk compile -kb "$KB" -km "$KM"
+        ;;
+    flash)
+        run_qmk flash -kb "$KB" -km "$KM"
+        ;;
+    compile:work)
+        run_qmk compile -kb "$KB" -km "$KM" -e "CONVERT_TO=$WORK_CONVERT"
+        ;;
+    flash:work:left)
+        run_qmk flash -kb "$KB" -km "$KM" -e "CONVERT_TO=$WORK_CONVERT" -bl uf2-split-left
+        ;;
+    flash:work:right)
+        run_qmk flash -kb "$KB" -km "$KM" -e "CONVERT_TO=$WORK_CONVERT" -bl uf2-split-right
+        ;;
+    help|-h|--help|"")
+        usage
+        ;;
+    *)
+        echo "Unknown command: $cmd" >&2
+        echo >&2
+        usage >&2
+        exit 1
+        ;;
+esac

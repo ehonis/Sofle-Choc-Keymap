@@ -6,8 +6,9 @@ Two base layers share the same layout; only the **left thumb** Ctrl/Gui keys swa
 
 | Profile | RGB (base layer) | OLED (above WPM) |
 |---------|------------------|------------------|
-| Mac (default) | Neutral white | Apple icon |
-| Windows | Cool white | Windows icon |
+| Mac (default) | Neon light blue | Apple icon |
+| Windows | Deep amethyst purple | Windows icon |
+| Nav (either profile) | White | Same WPM + profile icon |
 
 ### Switch profiles
 
