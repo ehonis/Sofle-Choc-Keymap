@@ -3,7 +3,8 @@
 #
 # Usage (from anywhere):
 #   ./sofle compile
-#   ./sofle flash
+#   ./sofle flash:left
+#   ./sofle flash:right
 #   ./sofle compile:work
 #   ./sofle flash:work:left
 #   ./sofle flash:work:right
@@ -28,7 +29,8 @@ Usage: sofle <command>
 
 Home keyboard (AVR Pro Micro / Caterina):
   compile              Build .hex
-  flash                Build and flash (double-tap reset when prompted)
+  flash:left           Flash left half and store left handedness in EEPROM
+  flash:right          Flash right half and store right handedness in EEPROM
 
 Work keyboard (RP2040 / UF2, TRRS unplugged per half):
   compile:work         Build .uf2
@@ -48,8 +50,16 @@ case "$cmd" in
     compile)
         run_qmk compile -kb "$KB" -km "$KM"
         ;;
-    flash)
-        run_qmk flash -kb "$KB" -km "$KM"
+    flash:left)
+        # EE_HANDS requires a side-specific target. Besides writing the firmware,
+        # this stores "left" in the Pro Micro's EEPROM so split features such as
+        # encoder numbering report this knob as encoder 0.
+        run_qmk flash -kb "$KB" -km "$KM" -bl avrdude-split-left
+        ;;
+    flash:right)
+        # Store "right" in this half's EEPROM. Without this, both controllers can
+        # identify as left and both physical encoders will use encoder-map index 0.
+        run_qmk flash -kb "$KB" -km "$KM" -bl avrdude-split-right
         ;;
     compile:work)
         run_qmk compile -kb "$KB" -km "$KM" -e "CONVERT_TO=$WORK_CONVERT"

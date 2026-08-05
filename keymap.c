@@ -29,8 +29,12 @@ enum sofle_layers { _BASE = 0, _BASE_WIN = 1, _NAV_SYM = 2, _NAV_SYM_WIN = 3 };
  * PLU_EQ  — `=` unshifted, `+` with Shift  (KC_PLUS / KC_EQL)
  * LBR_BRC — `[` unshifted, `{` with Shift  (KC_LCBR is Shift+LBRC only)
  * RBR_BRC — `]` unshifted, `}` with Shift  (KC_RCBR is Shift+RBRC only)
+ * ZOOM_IN — browser/page zoom in using the active profile's native shortcut:
+ *           Command+Plus on macOS or Ctrl+Plus on Windows.
+ * ZOOM_OUT — the inverse action used when the nav key is held:
+ *            Command+Minus on macOS or Ctrl+Minus on Windows.
  */
-enum custom_keycodes { PLU_EQ = SAFE_RANGE, LBR_BRC, RBR_BRC };
+enum custom_keycodes { PLU_EQ = SAFE_RANGE, LBR_BRC, RBR_BRC, ZOOM_IN, ZOOM_OUT };
 
 /*
  * Profile = is the _BASE_WIN bit set in the (split-synced) layer_state.
@@ -361,6 +365,31 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record) {
         case RBR_BRC:
             tap_us_key_shifted(KC_RBRC);
             return false;
+        case ZOOM_IN:
+            /*
+             * The encoder's push switch is a normal matrix key. Send one complete
+             * zoom shortcut per press instead of holding the modifiers while the
+             * knob remains depressed. The Windows base-layer bit is split-synced,
+             * so this also behaves correctly when the left half is not USB master.
+             */
+            if (is_windows_profile_active()) {
+                tap_code16(C(KC_PLUS));
+            } else {
+                tap_code16(G(KC_PLUS));
+            }
+            return false;
+        case ZOOM_OUT:
+            /*
+             * The nav overlay replaces ZOOM_IN with ZOOM_OUT at the same physical
+             * encoder-switch position. Minus is already an unshifted key, so only
+             * the operating system's Command/Ctrl modifier needs to be added.
+             */
+            if (is_windows_profile_active()) {
+                tap_code16(C(KC_MINS));
+            } else {
+                tap_code16(G(KC_MINS));
+            }
+            return false;
     }
 
     return true;
@@ -376,7 +405,8 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
  * Row3: LSft Z X C V B           inner tall: mute
  * Thumbs horizontal (outer→inner): Cmd  Alt  Ctrl  Alt  ·  tall Space (matrix order below)
  *
- * BETWEEN HALVES row4: mute (left) | vol up (right) — matches Sofle dual-inner slots
+ * BETWEEN HALVES row4: left encoder press = page zoom in;
+ *                      right encoder press = media play/pause
  *
  * RIGHT
  * Row0 (number row above home): 6-0 + KC_GRV (tilde/~ key legend)
@@ -391,7 +421,7 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
     KC_ESC,   KC_1, KC_2, KC_3, KC_4, KC_5,                                KC_6, KC_7, KC_8,    KC_9, KC_0,    KC_GRV,
     KC_TAB,   KC_Q, KC_W, KC_E, KC_R, KC_T,                                KC_Y, KC_U, KC_I,    KC_O, KC_P,    KC_BSLS,
     KC_LCTL, KC_A, KC_S, KC_D, KC_F, KC_G,                                KC_H, KC_J, KC_K,    KC_L, KC_SCLN, KC_QUOT,
-    KC_LSFT,  KC_Z, KC_X, KC_C, KC_V, KC_B, KC_VOLU, KC_VOLU,              KC_N, KC_M, KC_COMM, KC_DOT, KC_SLSH, KC_RSFT,
+    KC_LSFT,  KC_Z, KC_X, KC_C, KC_V, KC_B, ZOOM_IN, KC_MPLY,              KC_N, KC_M, KC_COMM, KC_DOT, KC_SLSH, KC_RSFT,
               KC_LCTL, KC_LALT, KC_LGUI, MO(_NAV_SYM), KC_SPC,                  KC_ENT, KC_BSPC, KC_LALT, KC_LGUI, KC_RCTL
 ),
 
@@ -404,13 +434,14 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
     KC_ESC,   KC_1, KC_2, KC_3, KC_4, KC_5,                                KC_6, KC_7, KC_8,    KC_9, KC_0,    KC_GRV,
     KC_TAB,   KC_Q, KC_W, KC_E, KC_R, KC_T,                                KC_Y, KC_U, KC_I,    KC_O, KC_P,    KC_BSLS,
     KC_LCTL, KC_A, KC_S, KC_D, KC_F, KC_G,                                KC_H, KC_J, KC_K,    KC_L, KC_SCLN, KC_QUOT,
-    KC_LSFT,  KC_Z, KC_X, KC_C, KC_V, KC_B, KC_VOLU, KC_VOLU,              KC_N, KC_M, KC_COMM, KC_DOT, KC_SLSH, KC_RSFT,
+    KC_LSFT,  KC_Z, KC_X, KC_C, KC_V, KC_B, ZOOM_IN, KC_MPLY,              KC_N, KC_M, KC_COMM, KC_DOT, KC_SLSH, KC_RSFT,
               KC_LGUI, KC_LALT, KC_LCTL, MO(_NAV_SYM_WIN), KC_SPC,                  KC_ENT, KC_BSPC, KC_LALT, KC_LGUI, KC_RCTL
 ),
 
 /*
  * Mac / Linux nav overlay (_NAV_SYM):
  * - TG(_BASE_WIN) top-left toggles the Windows profile (tap while holding nav).
+ * - Pressing the left encoder while nav is held zooms the page out.
  * - F1–F10 on left rows 0–1 (1–5 and Q–T); arrows on right hand only (I/J/K/L).
  * - Homerow LALT on A/S so Option+arrows still work when combined with arrow keys.
  * - -/+ shifted one right to ; and ' (KC_MINS / PLU_EQ).
@@ -420,7 +451,7 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
     TG(_BASE_WIN), KC_F1, KC_F2, KC_F3, KC_F4, KC_F5,               KC_NO, KC_NO, KC_NO, LBR_BRC, RBR_BRC, KC_NO,
     KC_NO, KC_F6, KC_F7, KC_F8, KC_F9, KC_F10,                      KC_NO, KC_NO, KC_UP,   KC_NO,   KC_NO,   KC_NO,
     KC_LALT, KC_LALT, KC_NO, KC_NO, KC_NO, KC_NO,                   KC_NO, KC_LEFT, KC_DOWN, KC_RGHT, KC_MINS, PLU_EQ,
-    KC_LSFT, KC_NO, KC_NO, KC_NO, KC_NO, KC_NO, KC_MUTE,           KC_NO,  KC_NO,   KC_NO,    KC_NO,   KC_NO,   KC_NO,   KC_NO,
+    KC_LSFT, KC_NO, KC_NO, KC_NO, KC_NO, KC_NO, ZOOM_OUT,          KC_MPLY, KC_NO,   KC_NO,    KC_NO,   KC_NO,   KC_NO,   KC_NO,
            KC_NO, KC_NO, KC_LGUI, KC_NO, KC_SPC,                    KC_LALT, KC_BSPC, KC_NO, KC_NO, KC_NO
 ),
 
@@ -428,6 +459,7 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
  * Windows nav overlay (_NAV_SYM_WIN):
  * - Same layout as _NAV_SYM, but LCTL replaces LALT so Ctrl+arrows match Windows
  *   word/paragraph navigation (same finger positions as Mac Option+arrows).
+ * - Pressing the left encoder while nav is held zooms the page out.
  * - F1–F10 on left rows 0–1 (1–5 and Q–T); F11 on `; Tab → F12.
  * - Arrows on right hand only (I/J/K/L); H → Ctrl+Alt+Del.
  * - -/+ shifted one right to ; and ' (KC_MINS / PLU_EQ).
@@ -437,21 +469,27 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
     TG(_BASE_WIN), KC_F1, KC_F2, KC_F3, KC_F4, KC_F5,               KC_NO, KC_NO, KC_NO, LBR_BRC, RBR_BRC, KC_F11,
     KC_TAB, KC_F6, KC_F7, KC_F8, KC_F9, KC_F10,                    C(A(KC_DEL)), KC_NO, KC_UP,   KC_NO,   KC_NO,   KC_F12,
     KC_LCTL, KC_LCTL, KC_NO, KC_NO, KC_NO, KC_NO,                   KC_NO, KC_LEFT, KC_DOWN, KC_RGHT, KC_MINS, PLU_EQ,
-    KC_LSFT, KC_NO, KC_NO, KC_NO, KC_NO, KC_NO, KC_MUTE,           KC_NO,  KC_NO,   KC_NO,    KC_NO,   KC_NO,   KC_NO,   KC_NO,
+    KC_LSFT, KC_NO, KC_NO, KC_NO, KC_NO, KC_NO, ZOOM_OUT,          KC_MPLY, KC_NO,   KC_NO,    KC_NO,   KC_NO,   KC_NO,   KC_NO,
            KC_NO, KC_NO, KC_LCTL, KC_NO, KC_SPC,                    KC_LCTL, KC_BSPC, KC_NO, KC_NO, KC_NO
 )
 };
 
 #if defined(ENCODER_MAP_ENABLE)
 /*
- * Both rotary encoders control system volume only (no scroll / page keys).
- * ENCODER_CCW_CW(ccw, cw): turn one way = quieter, the other = louder.
- * Same mapping on every layer so knobs always behave the same.
+ * Encoder 0 is the left knob and sends horizontal mouse-wheel movement. Most
+ * browsers, editors, and other scrollable views interpret this as side-to-side
+ * scrolling without requiring Shift to be held.
+ *
+ * Encoder 1 is the right knob and controls system volume.
+ * ENCODER_CCW_CW(ccw, cw) lists the counter-clockwise action first. Both pairs
+ * intentionally look reversed from the usual logical order because these
+ * physical encoders are mounted with the opposite rotational orientation.
+ * Every layer repeats the mapping so both knobs remain predictable while nav is held.
  */
 const uint16_t PROGMEM encoder_map[][NUM_ENCODERS][NUM_DIRECTIONS] = {
-    [_BASE]        = { ENCODER_CCW_CW(KC_VOLD, KC_VOLU), ENCODER_CCW_CW(KC_VOLD, KC_VOLU) },
-    [_NAV_SYM]     = { ENCODER_CCW_CW(KC_VOLD, KC_VOLU), ENCODER_CCW_CW(KC_VOLD, KC_VOLU) },
-    [_NAV_SYM_WIN] = { ENCODER_CCW_CW(KC_VOLD, KC_VOLU), ENCODER_CCW_CW(KC_VOLD, KC_VOLU) },
-    [_BASE_WIN]    = { ENCODER_CCW_CW(KC_VOLD, KC_VOLU), ENCODER_CCW_CW(KC_VOLD, KC_VOLU) },
+    [_BASE]        = { ENCODER_CCW_CW(MS_WHLR, MS_WHLL), ENCODER_CCW_CW(KC_VOLU, KC_VOLD) },
+    [_NAV_SYM]     = { ENCODER_CCW_CW(MS_WHLR, MS_WHLL), ENCODER_CCW_CW(KC_VOLU, KC_VOLD) },
+    [_NAV_SYM_WIN] = { ENCODER_CCW_CW(MS_WHLR, MS_WHLL), ENCODER_CCW_CW(KC_VOLU, KC_VOLD) },
+    [_BASE_WIN]    = { ENCODER_CCW_CW(MS_WHLR, MS_WHLL), ENCODER_CCW_CW(KC_VOLU, KC_VOLD) },
 };
 #endif
