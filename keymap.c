@@ -7,6 +7,12 @@
 #    include "rgb_matrix.h"
 #endif
 
+#ifdef SPLIT_KEYBOARD
+#    include "transactions.h"
+#endif
+
+#include <string.h>
+
 /*
  * Layer order matters: nav overlays MUST be the highest layer numbers.
  * QMK resolves keys from the highest active layer downward.
@@ -93,13 +99,121 @@ static void set_layer_rgb(layer_state_t state) {
 }
 #endif
 
+/*
+ * ---------------------------------------------------------------------------
+ * Lifetime keypress counter (replaces the old WPM readout)
+ * ---------------------------------------------------------------------------
+ *
+ * Counts every physical key press - not releases, and not encoder turns, which
+ * also arrive at process_record_user() but as ENCODER_*_EVENT rather than
+ * KEY_EVENT. Both OLEDs show the running total as 437 / 11.3k / 1.5m.
+ *
+ * Persistence: the live total lives in RAM and is flushed to user EEPROM only
+ * periodically. Writing on every keystroke would destroy the chip - EEPROM cells
+ * endure on the order of 100k writes, which at typing speed is a matter of hours.
+ * Instead we flush when either:
+ *   - CHARCOUNT_FLUSH_CHARS presses have accumulated since the last write, or
+ *   - typing has been idle for CHARCOUNT_IDLE_MS with at least
+ *     CHARCOUNT_IDLE_MIN presses pending.
+ *
+ * Net effect: a few dozen writes a day (many years of EEPROM life). The most a
+ * hard unplug can cost you is the presses since the last flush - and since the
+ * idle flush fires 30 s after you stop typing, in practice that is usually zero.
+ */
+#define CHARCOUNT_FLUSH_CHARS 2000
+#define CHARCOUNT_IDLE_MS 30000
+#define CHARCOUNT_IDLE_MIN 20
+
+static uint32_t charcount_total    = 0; /* live total rendered on both OLEDs */
+static uint32_t charcount_saved    = 0; /* last total written to EEPROM      */
+static uint32_t charcount_last_key = 0; /* timer for the idle flush          */
+
+/*
+ * QMK calls this when the user EEPROM block is missing or stale (a fresh board,
+ * or after an EEPROM clear). Seed the stored total at zero.
+ */
+void eeconfig_init_user_datablock(void) {
+    uint32_t zero = 0;
+    eeconfig_update_user_datablock(&zero, 0, sizeof(zero));
+}
+
+static void charcount_load(void) {
+    if (eeconfig_is_user_datablock_valid()) {
+        eeconfig_read_user_datablock(&charcount_total, 0, sizeof(charcount_total));
+    } else {
+        charcount_total = 0;
+        eeconfig_update_user_datablock(&charcount_total, 0, sizeof(charcount_total));
+    }
+    charcount_saved = charcount_total;
+}
+
+static void charcount_flush(void) {
+    if (charcount_total == charcount_saved) {
+        return;
+    }
+    eeconfig_update_user_datablock(&charcount_total, 0, sizeof(charcount_total));
+    charcount_saved = charcount_total;
+}
+
+static void charcount_maybe_flush(void) {
+    uint32_t pending = charcount_total - charcount_saved;
+    if (pending == 0) {
+        return;
+    }
+    if (pending >= CHARCOUNT_FLUSH_CHARS || (pending >= CHARCOUNT_IDLE_MIN && timer_elapsed32(charcount_last_key) >= CHARCOUNT_IDLE_MS)) {
+        charcount_flush();
+    }
+}
+
+#ifdef SPLIT_KEYBOARD
+/*
+ * Slave side of the CHARCOUNT_SYNC transaction: only the USB master runs
+ * process_record_user(), so the slave has no way to count. It just adopts
+ * whatever total the master pushes, which keeps both OLEDs showing the same number.
+ */
+static void charcount_sync_handler(uint8_t in_len, const void *in_data, uint8_t out_len, void *out_data) {
+    if (in_len == sizeof(uint32_t)) {
+        memcpy(&charcount_total, in_data, sizeof(uint32_t));
+    }
+}
+#endif
+
 void keyboard_post_init_user(void) {
+#ifdef SPLIT_KEYBOARD
+    /* Both halves register: the slave needs the receive callback installed. */
+    transaction_register_rpc(CHARCOUNT_SYNC, charcount_sync_handler);
+#endif
+
+    if (is_keyboard_master()) {
+        charcount_load();
+    }
+
 #ifdef RGB_MATRIX_ENABLE
     if (!is_keyboard_master()) {
         return;
     }
     eeconfig_update_rgb_matrix_default();
     set_layer_rgb(layer_state);
+#endif
+}
+
+void housekeeping_task_user(void) {
+    if (!is_keyboard_master()) {
+        return;
+    }
+
+    charcount_maybe_flush();
+
+#ifdef SPLIT_KEYBOARD
+    /* Push the total to the slave at most ~4x a second, and only when it moved. */
+    static uint32_t last_push_at    = 0;
+    static uint32_t last_push_value = UINT32_MAX;
+    if (charcount_total != last_push_value && timer_elapsed32(last_push_at) > 250) {
+        if (transaction_rpc_send(CHARCOUNT_SYNC, sizeof(charcount_total), &charcount_total)) {
+            last_push_value = charcount_total;
+        }
+        last_push_at = timer_read32();
+    }
 #endif
 }
 
@@ -120,26 +234,29 @@ layer_state_t layer_state_set_user(layer_state_t state) {
 
 #ifdef OLED_ENABLE
 /*
- * Portrait OLED view with a large centered numeric speed readout.
+ * Landscape OLED view: one large centred number, the lifetime keypress total.
  *
  * Design goal:
- * - remove labels ("WPM", layer text, modifiers, etc.)
- * - show only a big number that grows from 0 upward as you type
- * - keep portrait orientation for easier top-down glance reading
+ * - no labels (layer text, modifiers, etc.), just the number plus the OS badge
+ * - abbreviate once it gets long: 437 -> 11.3k -> 1.5m
  *
  * Implementation note:
- * We draw a custom 7-segment style number with `oled_write_pixel` so we are not
- * limited by the tiny built-in 6x8 text font. This gives us a much larger number
- * without bringing in heavy bitmap assets.
+ * We draw custom 7-segment style glyphs with oled_write_pixel so we are not limited
+ * by the tiny built-in 6x8 text font, and without pulling in heavy bitmap assets.
+ *
+ * Orientation (128 w x 32 h). The readout runs along the long axis of the panel
+ * because that is the only way a 5-glyph number (11.3k) fits at a legible size -
+ * the 32 px short axis only ever had room for two 13 px digits.
+ *
+ * If the display reads upside down on your build, change this to OLED_ROTATION_0.
  */
 oled_rotation_t oled_init_user(oled_rotation_t rotation) {
-    /* 270° gives a vertical read direction that is easier to see from above. */
-    return OLED_ROTATION_270;
+    return OLED_ROTATION_180;
 }
 
 /*
  * Draw one thick segment rectangle (filled) for a 7-segment digit.
- * `x`,`y` are top-left pixel coordinates in the rotated (portrait) OLED space.
+ * x,y are top-left pixel coordinates in the rotated (landscape) OLED space.
  */
 static void draw_seg(uint8_t x, uint8_t y, uint8_t w, uint8_t h) {
     for (uint8_t yy = 0; yy < h; yy++) {
@@ -161,9 +278,8 @@ static void draw_seg(uint8_t x, uint8_t y, uint8_t w, uint8_t h) {
  *  |       |
  *   ---d---
  *
- * Size used here (kept small enough to fit two digits in 32px portrait width):
- * - total width  = 13 px
- * - total height = 23 px
+ * Sized for the landscape layout: GLYPH_W x GLYPH_H (17 x 29) with a 3 px stroke,
+ * which fits four glyphs plus a decimal point alongside the 16 px profile badge.
  */
 /*
  * 16×16 profile icons in flash (PROGMEM). One uint16_t per row; bit 15 (MSB) is the
@@ -253,6 +369,25 @@ static void draw_profile_icon(uint8_t ox, uint8_t oy, const uint16_t *icon) {
     }
 }
 
+/* Glyph cell geometry for the landscape readout. */
+#define GLYPH_W 17     /* digit / letter cell width          */
+#define GLYPH_H 29     /* digit / letter cell height         */
+#define GLYPH_DOT_W 6  /* the decimal point gets a slim cell */
+#define GLYPH_GAP 4    /* space between adjacent cells       */
+
+/*
+ * The k / m suffix is a unit marker, not another digit, so it is drawn at roughly
+ * half height and sat on the baseline. At full digit size it reads as a third
+ * numeral and makes the number look lopsided.
+ */
+#define GLYPH_SUFFIX_W 10
+#define GLYPH_SUFFIX_H 15
+
+/* Glyph codes: 0-9 are literal digits, these are the extras. */
+#define GLYPH_DOT 10
+#define GLYPH_K 11
+#define GLYPH_M 12
+
 static void draw_big_digit(uint8_t x, uint8_t y, uint8_t digit) {
     static const uint8_t segmask[10] = {
         /*0*/ 0b00111111, /* a b c d e f */
@@ -273,62 +408,153 @@ static void draw_big_digit(uint8_t x, uint8_t y, uint8_t digit) {
 
     uint8_t m = segmask[digit];
 
-    /* Horizontal segments: 9x2 rectangles */
-    if (m & (1 << 0)) draw_seg((uint8_t)(x + 2), (uint8_t)(y + 0), 9, 2);   /* a */
-    if (m & (1 << 3)) draw_seg((uint8_t)(x + 2), (uint8_t)(y + 21), 9, 2);  /* d */
-    if (m & (1 << 6)) draw_seg((uint8_t)(x + 2), (uint8_t)(y + 10), 9, 2);  /* g */
+    /* Horizontal segments: 11x3 rectangles at top / middle / bottom. */
+    if (m & (1 << 0)) draw_seg((uint8_t)(x + 3), (uint8_t)(y + 0), 11, 3);   /* a */
+    if (m & (1 << 6)) draw_seg((uint8_t)(x + 3), (uint8_t)(y + 13), 11, 3);  /* g */
+    if (m & (1 << 3)) draw_seg((uint8_t)(x + 3), (uint8_t)(y + 26), 11, 3);  /* d */
 
-    /* Vertical segments: 2x9 rectangles */
-    if (m & (1 << 5)) draw_seg((uint8_t)(x + 0), (uint8_t)(y + 1), 2, 9);   /* f */
-    if (m & (1 << 4)) draw_seg((uint8_t)(x + 0), (uint8_t)(y + 12), 2, 9);  /* e */
-    if (m & (1 << 1)) draw_seg((uint8_t)(x + 11), (uint8_t)(y + 1), 2, 9);  /* b */
-    if (m & (1 << 2)) draw_seg((uint8_t)(x + 11), (uint8_t)(y + 12), 2, 9); /* c */
+    /* Vertical segments: 3x10 rectangles filling the gaps between them. */
+    if (m & (1 << 5)) draw_seg((uint8_t)(x + 0), (uint8_t)(y + 3), 3, 10);   /* f */
+    if (m & (1 << 4)) draw_seg((uint8_t)(x + 0), (uint8_t)(y + 16), 3, 10);  /* e */
+    if (m & (1 << 1)) draw_seg((uint8_t)(x + 14), (uint8_t)(y + 3), 3, 10);  /* b */
+    if (m & (1 << 2)) draw_seg((uint8_t)(x + 14), (uint8_t)(y + 16), 3, 10); /* c */
+}
+
+/*
+ * The k and m suffixes cannot be faked with 7-segment masks, so they are drawn
+ * directly. Both use the same 17x29 cell so they line up with the digits beside them.
+ */
+/* Both letters fill a GLYPH_SUFFIX_W x GLYPH_SUFFIX_H cell with a 2 px stroke. */
+static void draw_letter_k(uint8_t x, uint8_t y) {
+    draw_seg(x, y, 2, GLYPH_SUFFIX_H); /* upright stem */
+    /* Two staircase diagonals meeting the stem at mid height. */
+    for (uint8_t i = 0; i < 7; i++) {
+        draw_seg((uint8_t)(x + 7 - i), (uint8_t)(y + i), 2, 2);     /* upper arm */
+        draw_seg((uint8_t)(x + 1 + i), (uint8_t)(y + 7 + i), 2, 2); /* lower arm */
+    }
+}
+
+static void draw_letter_m(uint8_t x, uint8_t y) {
+    draw_seg(x, y, GLYPH_SUFFIX_W, 2);                  /* top bar       */
+    draw_seg(x, y, 2, GLYPH_SUFFIX_H);                  /* left upright  */
+    draw_seg((uint8_t)(x + 8), y, 2, GLYPH_SUFFIX_H);   /* right upright */
+    draw_seg((uint8_t)(x + 4), (uint8_t)(y + 2), 2, 6); /* centre leg    */
+}
+
+static uint8_t glyph_width(uint8_t code) {
+    switch (code) {
+        case GLYPH_DOT:
+            return GLYPH_DOT_W;
+        case GLYPH_K:
+        case GLYPH_M:
+            return GLYPH_SUFFIX_W;
+        default:
+            return GLYPH_W;
+    }
+}
+
+static void draw_glyph(uint8_t x, uint8_t y, uint8_t code) {
+    switch (code) {
+        case GLYPH_DOT:
+            /* Sits on the baseline so it reads as a decimal point, not a colon. */
+            draw_seg((uint8_t)(x + 1), (uint8_t)(y + GLYPH_H - 3), 4, 3);
+            break;
+        case GLYPH_K:
+            /* Bottom-aligned so the suffix sits on the same baseline as the digits. */
+            draw_letter_k(x, (uint8_t)(y + GLYPH_H - GLYPH_SUFFIX_H));
+            break;
+        case GLYPH_M:
+            draw_letter_m(x, (uint8_t)(y + GLYPH_H - GLYPH_SUFFIX_H));
+            break;
+        default:
+            draw_big_digit(x, y, code);
+            break;
+    }
+}
+
+/*
+ * Format the running total into at most 5 glyph cells:
+ *   0 - 999        ->  437
+ *   1k - 999k      ->  1.5k   11.3k   123k
+ *   1m and above   ->  1.5m   11.3m   123m
+ *
+ * Three significant digits leave no room for a decimal, so 123456 renders as
+ * 123k rather than 123.4k. Returns the number of glyphs written to out[].
+ */
+static uint8_t charcount_format(uint32_t v, uint8_t *out) {
+    uint8_t n = 0;
+
+    if (v < 1000UL) {
+        if (v >= 100UL) out[n++] = (uint8_t)(v / 100UL % 10UL);
+        if (v >= 10UL)  out[n++] = (uint8_t)(v / 10UL % 10UL);
+        out[n++] = (uint8_t)(v % 10UL);
+        return n;
+    }
+
+    uint8_t  suffix;
+    uint32_t tenths; /* the value rescaled into tenths of the suffix unit */
+    if (v < 1000000UL) {
+        suffix = GLYPH_K;
+        tenths = v / 100UL;
+    } else {
+        suffix = GLYPH_M;
+        tenths = v / 100000UL;
+    }
+    /* Clamp so a uint32 near its ceiling still fits the layout (tops out at 999m). */
+    if (tenths > 9999UL) {
+        tenths = 9999UL;
+    }
+
+    uint32_t whole = tenths / 10UL;
+    uint8_t  frac  = (uint8_t)(tenths % 10UL);
+
+    if (whole >= 100UL) {
+        out[n++] = (uint8_t)(whole / 100UL % 10UL);
+        out[n++] = (uint8_t)(whole / 10UL % 10UL);
+        out[n++] = (uint8_t)(whole % 10UL);
+    } else {
+        if (whole >= 10UL) out[n++] = (uint8_t)(whole / 10UL % 10UL);
+        out[n++] = (uint8_t)(whole % 10UL);
+        out[n++] = GLYPH_DOT;
+        out[n++] = frac;
+    }
+    out[n++] = suffix;
+    return n;
 }
 
 bool oled_task_user(void) {
     oled_clear();
 
-    /*
-     * Show the typing speed as a large two-digit number centered on screen.
-     * We clamp to 0..99 so the layout stays large and stable.
-     */
-    uint8_t val = 0;
-#ifdef WPM_ENABLE
-    val = get_current_wpm();
-#endif
-    if (val > 99) {
-        val = 99;
+    uint8_t glyphs[6];
+    uint8_t n = charcount_format(charcount_total, glyphs);
+
+    uint16_t total_w = (uint16_t)GLYPH_GAP * (n - 1);
+    for (uint8_t i = 0; i < n; i++) {
+        total_w = (uint16_t)(total_w + glyph_width(glyphs[i]));
     }
 
-    uint8_t tens = (uint8_t)(val / 10);
-    uint8_t ones = (uint8_t)(val % 10);
-
-    /* Portrait canvas: 32 w × 128 h. Center two 13-px digits with a 2-px gap between them. */
-    const uint8_t digit_w = 13;
-    const uint8_t gap     = 2;
-    const uint8_t total_w = (uint8_t)(digit_w * 2 + gap); /* 28 px total */
-    const uint8_t start_x = (uint8_t)((32 - total_w) / 2); /* x = 2, horizontally centered */
-    const uint8_t start_y = (uint8_t)((128 - 23) / 2);     /* y = 52, vertically centered */
-
     /*
-     * OS profile badge: flush to the bottom-right corner of the 32×128 canvas.
-     * Icon is 16×16 px → top-left at (16, 112) so it sits at pixel columns 16-31
-     * and pixel rows 112-127.
+     * Landscape canvas: 128 w x 32 h.
+     * The profile badge keeps its 16x16 cell flush to the right edge; the number is
+     * centred in whatever width is left of it.
      */
-    const uint8_t icon_x = 32 - 16; /* = 16 */
-    const uint8_t icon_y = 128 - 16; /* = 112 */
+    const uint8_t icon_x  = 128 - 16;
+    const uint8_t icon_y  = (32 - 16) / 2;
+    const uint8_t field_w = icon_x - GLYPH_GAP;
+
+    uint8_t       x = (total_w < field_w) ? (uint8_t)((field_w - total_w) / 2) : 0;
+    const uint8_t y = (32 - GLYPH_H) / 2;
+
+    for (uint8_t i = 0; i < n; i++) {
+        draw_glyph(x, y, glyphs[i]);
+        x = (uint8_t)(x + glyph_width(glyphs[i]) + GLYPH_GAP);
+    }
+
     if (is_windows_profile_active()) {
         draw_profile_icon(icon_x, icon_y, icon_win);
     } else {
         draw_profile_icon(icon_x, icon_y, icon_mac);
     }
-
-    /*
-     * Keep the leading zero for readability at a glance (e.g. "07").
-     * If you prefer blank leading zero, we can conditionally skip tens.
-     */
-    draw_big_digit(start_x, start_y, tens);
-    draw_big_digit((uint8_t)(start_x + digit_w + gap), start_y, ones);
 
     return false;
 }
@@ -353,6 +579,16 @@ static void tap_us_key_shifted(uint16_t keycode) {
 bool process_record_user(uint16_t keycode, keyrecord_t *record) {
     if (!record->event.pressed) {
         return true;
+    }
+
+    /*
+     * Count real key presses only. With ENCODER_MAP_ENABLE the knobs dispatch through
+     * here too, but as ENCODER_CW/CCW_EVENT - IS_KEYEVENT() filters those out so
+     * spinning the volume knob does not inflate the total.
+     */
+    if (IS_KEYEVENT(record->event)) {
+        charcount_total++;
+        charcount_last_key = timer_read32();
     }
 
     switch (keycode) {

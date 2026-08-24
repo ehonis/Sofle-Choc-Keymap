@@ -9,5 +9,5 @@ MOUSEKEY_ENABLE = yes
 # RP2040 work builds: use ./sofle compile:work (sets CONVERT_TO on the command line).
 # Home AVR builds: use ./sofle compile (no converter).
 
-# OLED “words per minute” readout (`get_current_wpm`) — weighted recent typing speed.
-WPM_ENABLE = yes
+# The OLED shows a lifetime keypress total (persisted in EEPROM), not WPM, so
+# WPM_ENABLE is intentionally off - it only costs flash on the AVR build.

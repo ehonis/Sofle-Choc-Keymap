@@ -30,10 +30,16 @@
 #define SPLIT_TRANSPORT_MIRROR
 
 /*
- * Mirror WPM from the USB “master” half to the slave so both OLEDs can show typing speed while
- * you type across the whole board (requires WPM_ENABLE in rules.mk).
+ * Lifetime keypress counter (replaces the old WPM readout).
+ *
+ * EECONFIG_USER_DATA_SIZE reserves user EEPROM bytes for the running total so the
+ * number survives unplugging. 4 bytes = one uint32_t (max 4,294,967,295 keypresses).
+ *
+ * Only the USB master runs process_record_user(), so it owns the count. The slave half
+ * needs the value for its own OLED, which is what the CHARCOUNT_SYNC split RPC carries.
  */
-#define SPLIT_WPM_ENABLE
+#define EECONFIG_USER_DATA_SIZE 4
+#define SPLIT_TRANSACTION_IDS_USER CHARCOUNT_SYNC
 
 /* Keep Mac/Win base layer and nav overlay identical on both halves. */
 #define SPLIT_LAYER_STATE_ENABLE

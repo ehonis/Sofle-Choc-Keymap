@@ -4,11 +4,11 @@
 
 Two base layers share the same layout; only the **left thumb** Ctrl/Gui keys swap on Windows so copy/paste shortcuts feel like macOS (Ctrl on the outer thumb).
 
-| Profile | RGB (base layer) | OLED (above WPM) |
+| Profile | RGB (base layer) | OLED (beside the counter) |
 |---------|------------------|------------------|
 | Mac (default) | Neon light blue | Apple icon |
 | Windows | Deep amethyst purple | Windows icon |
-| Nav (either profile) | White | Same WPM + profile icon |
+| Nav (either profile) | White | Same counter + profile icon |
 
 ### Switch profiles
 
@@ -18,6 +18,32 @@ Two base layers share the same layout; only the **left thumb** Ctrl/Gui keys swa
 Tap again with the same gesture to switch back. Profile resets to Mac after a full power cycle (not stored in EEPROM).
 
 Both OLEDs read the synced layer state (not a master-only variable), so the logo updates on the left and right half together.
+
+## OLED keypress counter
+
+The OLED shows a **lifetime keypress total** rather than WPM. It counts every key
+press (encoder turns are excluded) and abbreviates as it grows:
+
+| Total | Shown |
+|-------|-------|
+| 0 - 999 | `437` |
+| 1,000 - 999,999 | `1.5k`, `11.3k`, `123k` |
+| 1,000,000 and up | `1.5m`, `11.3m`, `123m` |
+
+The number **survives unplugging** - it is stored in user EEPROM
+(`EECONFIG_USER_DATA_SIZE`). It is deliberately *not* written on every keystroke:
+EEPROM cells endure only ~100k writes, so a per-keystroke write would wear the
+controller out within hours. Instead the total is flushed 30 s after you stop
+typing, or every 2,000 presses during a long session. A hard unplug can therefore
+lose at most the presses since the last flush, which in normal use is zero.
+
+Only the USB-connected half runs `process_record_user()`, so the master owns the
+count and pushes it to the other half over the `CHARCOUNT_SYNC` split transaction -
+that is what keeps both OLEDs showing the same number.
+
+The readout is drawn in landscape (`OLED_ROTATION_180`) along the panel's long
+axis; the 32 px short axis only ever had room for two digits. If the display reads
+upside down after a rebuild, switch that to `OLED_ROTATION_0` in `oled_init_user`.
 
 ### Nav overlays (Mac vs Windows)
 
