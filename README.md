@@ -15,7 +15,9 @@ Two base layers share the same layout; only the **left thumb** Ctrl/Gui keys swa
 1. **Hold** the nav-layer key (inner left thumb).
 2. **Tap** the top-left key on the left half (where `Esc` lives on the base layer). That key is `TG(_BASE_WIN)` on both nav overlays.
 
-Tap again with the same gesture to switch back. Profile resets to Mac after a full power cycle (not stored in EEPROM).
+Tap again with the same gesture to switch back. The active profile is **remembered across
+power cycles** - it is mirrored into user EEPROM whenever it changes and re-applied at boot,
+so the board comes back up on whichever profile you left it on.
 
 Both OLEDs read the synced layer state (not a master-only variable), so the logo updates on the left and right half together.
 
@@ -31,7 +33,8 @@ press (encoder turns are excluded) and abbreviates as it grows:
 | 1,000,000 and up | `1.5m`, `11.3m`, `123m` |
 
 The number **survives unplugging** - it is stored in user EEPROM
-(`EECONFIG_USER_DATA_SIZE`). It is deliberately *not* written on every keystroke:
+(`EECONFIG_USER_DATA_SIZE`, which also holds the active OS profile: bytes 0-3 are the
+count, byte 4 is the profile flag). It is deliberately *not* written on every keystroke:
 EEPROM cells endure only ~100k writes, so a per-keystroke write would wear the
 controller out within hours. Instead the total is flushed 30 s after you stop
 typing, or every 2,000 presses during a long session. A hard unplug can therefore

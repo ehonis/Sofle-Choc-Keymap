@@ -124,6 +124,10 @@ static void set_layer_rgb(layer_state_t state) {
 #define CHARCOUNT_IDLE_MS 30000
 #define CHARCOUNT_IDLE_MIN 20
 
+/* Byte offsets inside the user EEPROM datablock (total size set in config.h). */
+#define EE_OFFSET_CHARCOUNT 0 /* uint32_t lifetime keypress total */
+#define EE_OFFSET_PROFILE 4   /* uint8_t  1 = Windows, 0 = Mac    */
+
 static uint32_t charcount_total    = 0; /* live total rendered on both OLEDs */
 static uint32_t charcount_saved    = 0; /* last total written to EEPROM      */
 static uint32_t charcount_last_key = 0; /* timer for the idle flush          */
@@ -133,25 +137,46 @@ static uint32_t charcount_last_key = 0; /* timer for the idle flush          */
  * or after an EEPROM clear). Seed the stored total at zero.
  */
 void eeconfig_init_user_datablock(void) {
-    uint32_t zero = 0;
-    eeconfig_update_user_datablock(&zero, 0, sizeof(zero));
+    uint32_t zero_count   = 0;
+    uint8_t  zero_profile = 0;
+    eeconfig_update_user_datablock(&zero_count, EE_OFFSET_CHARCOUNT, sizeof(zero_count));
+    eeconfig_update_user_datablock(&zero_profile, EE_OFFSET_PROFILE, sizeof(zero_profile));
 }
 
-static void charcount_load(void) {
+/*
+ * Windows-profile persistence.
+ *
+ * The profile is just the _BASE_WIN bit in layer_state, flipped by TG(_BASE_WIN) on
+ * the nav overlay. Nothing in QMK persists a toggled (non-default) layer, so before
+ * this the board always came back up on the Mac profile. We mirror the bit into
+ * EEPROM whenever it changes and re-apply it at boot.
+ *
+ * profile_tracking stays false until the stored value has been loaded, so the
+ * layer_on() call below cannot write the value straight back out again.
+ */
+static bool profile_tracking  = false;
+static bool profile_stored_win = false;
+
+static void user_eeprom_load(void) {
+    uint8_t stored_profile = 0;
+
     if (eeconfig_is_user_datablock_valid()) {
-        eeconfig_read_user_datablock(&charcount_total, 0, sizeof(charcount_total));
+        eeconfig_read_user_datablock(&charcount_total, EE_OFFSET_CHARCOUNT, sizeof(charcount_total));
+        eeconfig_read_user_datablock(&stored_profile, EE_OFFSET_PROFILE, sizeof(stored_profile));
     } else {
         charcount_total = 0;
-        eeconfig_update_user_datablock(&charcount_total, 0, sizeof(charcount_total));
+        eeconfig_init_user_datablock();
     }
-    charcount_saved = charcount_total;
+
+    charcount_saved    = charcount_total;
+    profile_stored_win = (stored_profile != 0);
 }
 
 static void charcount_flush(void) {
     if (charcount_total == charcount_saved) {
         return;
     }
-    eeconfig_update_user_datablock(&charcount_total, 0, sizeof(charcount_total));
+    eeconfig_update_user_datablock(&charcount_total, EE_OFFSET_CHARCOUNT, sizeof(charcount_total));
     charcount_saved = charcount_total;
 }
 
@@ -185,7 +210,16 @@ void keyboard_post_init_user(void) {
 #endif
 
     if (is_keyboard_master()) {
-        charcount_load();
+        user_eeprom_load();
+
+        /*
+         * Re-apply the stored profile. SPLIT_LAYER_STATE_ENABLE pushes the resulting
+         * layer_state to the other half, so both OLED badges and both RGB sides follow.
+         */
+        if (profile_stored_win) {
+            layer_on(_BASE_WIN);
+        }
+        profile_tracking = true;
     }
 
 #ifdef RGB_MATRIX_ENABLE
@@ -221,6 +255,21 @@ layer_state_t layer_state_set_user(layer_state_t state) {
 #ifdef RGB_MATRIX_ENABLE
     set_layer_rgb(state);
 #endif
+
+    /*
+     * Persist the profile only when the _BASE_WIN bit actually flips. This hook also
+     * fires for every nav-layer hold, and writing EEPROM on those would be both
+     * pointless and hard on the cells.
+     */
+    if (profile_tracking && is_keyboard_master()) {
+        bool win = (state & (1UL << _BASE_WIN)) != 0;
+        if (win != profile_stored_win) {
+            profile_stored_win  = win;
+            uint8_t stored_profile = win ? 1 : 0;
+            eeconfig_update_user_datablock(&stored_profile, EE_OFFSET_PROFILE, sizeof(stored_profile));
+        }
+    }
+
     return state;
 }
 

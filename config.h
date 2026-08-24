@@ -32,13 +32,18 @@
 /*
  * Lifetime keypress counter (replaces the old WPM readout).
  *
- * EECONFIG_USER_DATA_SIZE reserves user EEPROM bytes for the running total so the
- * number survives unplugging. 4 bytes = one uint32_t (max 4,294,967,295 keypresses).
+ * EECONFIG_USER_DATA_SIZE reserves user EEPROM bytes so both the running total and
+ * the active OS profile survive unplugging. Layout (see the offsets in keymap.c):
+ *   bytes 0-3  uint32_t  lifetime keypress total
+ *   byte  4    uint8_t   1 = Windows profile, 0 = Mac
+ *
+ * Bumping this size changes EECONFIG_USER_DATA_VERSION, which invalidates the old
+ * block and re-seeds it at zero - so growing it resets the stored counter once.
  *
  * Only the USB master runs process_record_user(), so it owns the count. The slave half
  * needs the value for its own OLED, which is what the CHARCOUNT_SYNC split RPC carries.
  */
-#define EECONFIG_USER_DATA_SIZE 4
+#define EECONFIG_USER_DATA_SIZE 5
 #define SPLIT_TRANSACTION_IDS_USER CHARCOUNT_SYNC
 
 /* Keep Mac/Win base layer and nav overlay identical on both halves. */
