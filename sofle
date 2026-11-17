@@ -1,20 +1,16 @@
 #!/usr/bin/env bash
 # Quick QMK shortcuts for ethan_keymap (home AVR Sofle vs work RP2040 Sofle).
 #
-# Usage (from anywhere):
-#   ./sofle compile
-#   ./sofle flash:left
-#   ./sofle flash:right
-#   ./sofle compile:work
-#   ./sofle flash:work:left
-#   ./sofle flash:work:right
+# Usage:
+#   sofle flash:work      build both halves, then flash left + right (RP2040)
+#   sofle flash:home      flash left + right of the AVR board, one after the other
+#   sofle compile[:work]  build only
 #
-# Optional: add this folder to PATH to run `sofle` without ./
+# On Windows, run it from PowerShell / cmd through sofle.cmd (same folder), which
+# starts QMK MSYS for you. This repo must be linked into qmk_firmware as
+# keyboards/sofle_choc/keymaps/ethan_keymap (see README "Build machine setup").
 
 set -euo pipefail
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-QMK_DIR="$(cd "$SCRIPT_DIR/../../../../.." && pwd)"
 
 KB="sofle_choc"
 KM="ethan_keymap"
@@ -23,52 +19,152 @@ KM="ethan_keymap"
 # Change if you use Elite-Pi, Helios, Liatris, etc. (see QMK CONVERT_TO docs).
 WORK_CONVERT="sparkfun_pm2040"
 
+# Parallel make jobs; a side-specific build recompiles everything.
+JOBS="$(nproc 2>/dev/null || echo 4)"
+
 usage() {
     cat <<EOF
 Usage: sofle <command>
 
-Home keyboard (AVR Pro Micro / Caterina):
-  compile              Build .hex
-  flash:left           Flash left half and store left handedness in EEPROM
-  flash:right          Flash right half and store right handedness in EEPROM
+Work keyboard (RP2040 / UF2):
+  flash:work           Build both halves, then flash LEFT then RIGHT.
+                       Prompts you to plug in each half and double-tap its reset.
+  compile:work         Build only
+  flash:work:left      Flash just the left half
+  flash:work:right     Flash just the right half
 
-Work keyboard (RP2040 / UF2, TRRS unplugged per half):
-  compile:work         Build .uf2
-  flash:work:left      Flash left half (uf2-split-left)
-  flash:work:right     Flash right half (uf2-split-right)
+Home keyboard (AVR Pro Micro / Caterina):
+  flash:home           Flash LEFT then RIGHT (prompts between halves)
+  compile              Build only
+  flash:left           Flash just the left half (stores left handedness)
+  flash:right          Flash just the right half (stores right handedness)
 
 EOF
 }
 
-run_qmk() {
-    cd "$QMK_DIR"
-    qmk "$@"
+# qmk resolves qmk_firmware from its own config (user.qmk_home), so no cd needed.
+qmk_home() {
+    local home
+    home="$(qmk env QMK_HOME 2>/dev/null | tr -d '\r"')"
+    if command -v cygpath >/dev/null 2>&1; then
+        home="$(cygpath -u "$home")"
+    fi
+    echo "$home"
+}
+
+say() { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
+
+# Build the work firmware for one side. INIT_EE_HANDS_LEFT/RIGHT is exactly what
+# `qmk flash -bl uf2-split-left/right` adds: the firmware writes its side into
+# the emulated EEPROM at boot, so each half needs its own build.
+build_work_side() {
+    local side="$1" flag="$2" out="$3"
+    say "Building $side half"
+    qmk compile -j "$JOBS" -kb "$KB" -km "$KM" -e "CONVERT_TO=$WORK_CONVERT" -e "EXTRAFLAGS=-D$flag"
+    cp "$(qmk_home)/${KB}_${KM}_${WORK_CONVERT}.uf2" "$out"
+}
+
+# Print the mount path of every RP2040 bootloader drive currently attached.
+# Same detection QMK's uf2conv.py uses on Windows: FAT volumes with INFO_UF2.TXT.
+UF2_FS_MATCH="${UF2_FS_MATCH:-FAT*}"       # overridable for testing
+UF2_INFO_FILE="${UF2_INFO_FILE:-INFO_UF2.TXT}"
+uf2_drives() {
+    if command -v powershell.exe >/dev/null 2>&1; then
+        powershell.exe -NoProfile -NonInteractive -Command \
+            "Get-CimInstance Win32_LogicalDisk | Where-Object { \$_.FileSystem -like \"$UF2_FS_MATCH\" -and (Test-Path (\$_.DeviceID + \"\\$UF2_INFO_FILE\")) } | ForEach-Object { \$_.DeviceID }" \
+            2>/dev/null | tr -d '\r' | while read -r d; do
+            [ -n "$d" ] && cygpath -u "$d\\"
+        done
+    else
+        for d in /media/*/* /run/media/*/* /Volumes/*; do
+            [ -f "$d/INFO_UF2.TXT" ] && echo "$d/"
+        done
+    fi
+    return 0
+}
+
+flash_uf2_side() {
+    local side="$1" uf2="$2" drives count
+    say "Flash the $side half"
+    echo "  1. Unplug USB and the TRRS cable from both halves."
+    echo "  2. Plug USB into the $side half only."
+    echo "  3. Double-tap its reset button (an RPI-RP2 drive appears)."
+    echo
+    echo "Waiting for the bootloader drive... (Ctrl+C to cancel)"
+    while :; do
+        drives="$(uf2_drives)"
+        count="$(printf '%s' "$drives" | grep -c . || true)"
+        if [ "$count" -eq 1 ]; then
+            break
+        elif [ "$count" -gt 1 ]; then
+            echo "More than one RPI-RP2 drive is attached ($(echo $drives)). Leave only the $side half connected." >&2
+            sleep 3
+        else
+            sleep 1
+        fi
+    done
+    echo "Found $drives - copying $(basename "$uf2")"
+    cp "$uf2" "$drives"
+    # The RP2040 reboots into the new firmware as soon as the copy lands.
+    while [ -n "$(uf2_drives)" ]; do sleep 1; done
+    echo "$side half flashed."
+}
+
+flash_work_both() {
+    local stage left right
+    stage="$(qmk_home)/.build"
+    mkdir -p "$stage"
+    left="$stage/sofle_work_left.uf2"
+    right="$stage/sofle_work_right.uf2"
+
+    build_work_side left INIT_EE_HANDS_LEFT "$left"
+    build_work_side right INIT_EE_HANDS_RIGHT "$right"
+
+    flash_uf2_side LEFT "$left"
+    flash_uf2_side RIGHT "$right"
+
+    say "Done. Unplug USB, reconnect the TRRS cable, then plug USB back in."
+}
+
+flash_home_both() {
+    say "Flash the LEFT half: TRRS unplugged, USB in the left half, then press reset when QMK asks."
+    qmk flash -kb "$KB" -km "$KM" -bl avrdude-split-left
+    say "Now the RIGHT half: move USB to the right half, then press reset when QMK asks."
+    read -r -p "Press Enter when the right half is plugged in... "
+    qmk flash -kb "$KB" -km "$KM" -bl avrdude-split-right
+    say "Done. Unplug USB, reconnect the TRRS cable, then plug USB back in."
 }
 
 cmd="${1:-}"
 case "$cmd" in
     compile)
-        run_qmk compile -kb "$KB" -km "$KM"
+        qmk compile -j "$JOBS" -kb "$KB" -km "$KM"
         ;;
     flash:left)
         # EE_HANDS requires a side-specific target. Besides writing the firmware,
         # this stores "left" in the Pro Micro's EEPROM so split features such as
         # encoder numbering report this knob as encoder 0.
-        run_qmk flash -kb "$KB" -km "$KM" -bl avrdude-split-left
+        qmk flash -kb "$KB" -km "$KM" -bl avrdude-split-left
         ;;
     flash:right)
         # Store "right" in this half's EEPROM. Without this, both controllers can
         # identify as left and both physical encoders will use encoder-map index 0.
-        run_qmk flash -kb "$KB" -km "$KM" -bl avrdude-split-right
+        qmk flash -kb "$KB" -km "$KM" -bl avrdude-split-right
+        ;;
+    flash:home)
+        flash_home_both
         ;;
     compile:work)
-        run_qmk compile -kb "$KB" -km "$KM" -e "CONVERT_TO=$WORK_CONVERT"
+        qmk compile -j "$JOBS" -kb "$KB" -km "$KM" -e "CONVERT_TO=$WORK_CONVERT"
+        ;;
+    flash:work)
+        flash_work_both
         ;;
     flash:work:left)
-        run_qmk flash -kb "$KB" -km "$KM" -e "CONVERT_TO=$WORK_CONVERT" -bl uf2-split-left
+        qmk flash -kb "$KB" -km "$KM" -e "CONVERT_TO=$WORK_CONVERT" -bl uf2-split-left
         ;;
     flash:work:right)
-        run_qmk flash -kb "$KB" -km "$KM" -e "CONVERT_TO=$WORK_CONVERT" -bl uf2-split-right
+        qmk flash -kb "$KB" -km "$KM" -e "CONVERT_TO=$WORK_CONVERT" -bl uf2-split-right
         ;;
     help|-h|--help|"")
         usage
