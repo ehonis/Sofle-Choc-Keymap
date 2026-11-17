@@ -17,7 +17,8 @@
  * A plain `qmk flash` does not assign the side; if both halves identify as left,
  * both physical encoders are reported as encoder 0 and receive the left mapping.
  *
- * RP2040 (UF2): flash EACH half with a different bootloader target (TRRS unplugged):
+ * RP2040 (UF2): `sofle flash:work` builds and flashes both halves in order. By hand,
+ * flash EACH half with a different bootloader target (TRRS unplugged):
  *   Left half:  qmk flash -kb sofle_choc -km ethan_keymap -bl uf2-split-left
  *   Right half: qmk flash -kb sofle_choc -km ethan_keymap -bl uf2-split-right
  * (CONVERT_TO in rules.mk is picked up automatically.)

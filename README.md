@@ -6,8 +6,8 @@ Two base layers share the same layout; only the **left thumb** Ctrl/Gui keys swa
 
 | Profile | RGB (base layer) | OLED (beside the counter) |
 |---------|------------------|------------------|
-| Mac (default) | Neon light blue | Apple icon |
-| Windows | Deep amethyst purple | Windows icon |
+| Mac (default) | Neon light blue | Pine tree |
+| Windows | Deep amethyst purple | Snowy pine tree |
 | Nav (either profile) | White | Same counter + profile icon |
 
 ### Switch profiles
@@ -19,18 +19,24 @@ Tap again with the same gesture to switch back. The active profile is **remember
 power cycles** - it is mirrored into user EEPROM whenever it changes and re-applied at boot,
 so the board comes back up on whichever profile you left it on.
 
-Both OLEDs read the synced layer state (not a master-only variable), so the logo updates on the left and right half together.
+Both OLEDs read the synced layer state (not a master-only variable), so the tree updates on the left and right half together.
 
 ## OLED keypress counter
 
 The OLED shows a **lifetime keypress total** rather than WPM. It counts every key
-press (encoder turns are excluded) and abbreviates as it grows:
+press (encoder turns are excluded) and abbreviates as it grows. The whole part
+is drawn big; every digit after the decimal point is drawn **small** (shown as
+subscripts below):
 
-| Total | Shown |
-|-------|-------|
-| 0 - 999 | `437` |
-| 1,000 - 999,999 | `1.5k`, `11.3k`, `123k` |
-| 1,000,000 and up | `1.5m`, `11.3m`, `123m` |
+| Total | Shown | Exact to |
+|-------|-------|----------|
+| 0 - 999 | `437` | 1 |
+| 1,000 - 99,999 | `1.₂₃₄k`, `12.₃₄₅k` | 1 |
+| 100,000 - 999,999 | `123.₄₅k` | 10 |
+| 1,000,000 - 99,999,999 | `1.₂₃₄m`, `12.₃₄₅m` | 1,000 |
+| 100,000,000 and up | `123.₄₅m` | 10,000 |
+
+Values are truncated rather than rounded, so the readout ticks like an odometer.
 
 The number **survives unplugging** - it is stored in user EEPROM
 (`EECONFIG_USER_DATA_SIZE`, which also holds the active OS profile: bytes 0-3 are the
@@ -43,6 +49,10 @@ lose at most the presses since the last flush, which in normal use is zero.
 Only the USB-connected half runs `process_record_user()`, so the master owns the
 count and pushes it to the other half over the `CHARCOUNT_SYNC` split transaction -
 that is what keeps both OLEDs showing the same number.
+
+The digits use the **Oswald** typeface (SIL Open Font License), pre-rendered to
+1-bit bitmaps in `oled_font.h`. To try another font or weight, regenerate the header
+with `tools/gen_oled_font.py`; its docstring has the exact commands.
 
 The readout is drawn in landscape (`OLED_ROTATION_180`) along the panel's long
 axis; the 32 px short axis only ever had room for two digits. If the display reads
@@ -84,3 +94,35 @@ reset one half at a time, then run:
 Use `flash:left` only while the physical left half is connected and
 `flash:right` only for the physical right half. If both halves are flashed as
 left, both knobs use encoder 0's horizontal-scroll mapping.
+
+## Flashing
+
+One command does both halves. From this folder (PowerShell or cmd, via `sofle.cmd`):
+
+```powershell
+sofle flash:work    # work board (RP2040)
+sofle flash:home    # home board (AVR Pro Micro)
+```
+
+`flash:work` builds a left and a right image first (each half stores its side, so
+they differ), then walks you through it:
+
+1. Unplug USB and the TRRS cable from both halves.
+2. Plug USB into the **left** half and double-tap its reset button. An `RPI-RP2`
+   drive appears and the script copies the left image on its own.
+3. When it asks, move USB to the **right** half and double-tap reset again.
+4. Unplug USB, reconnect TRRS, plug USB back in.
+
+Do the left half first. If the halves come out swapped, you plugged in the right
+half first, so run it again in the right order.
+
+### Build machine setup (Windows)
+
+- [QMK MSYS](https://msys.qmk.fm/) installed at `C:\QMK_MSYS` (`sofle.cmd` uses it),
+  with `qmk setup` cloning `qmk_firmware` to `%USERPROFILE%\qmk_firmware`.
+- This repo linked into the QMK tree as the keymap folder:
+
+  ```powershell
+  New-Item -ItemType Junction -Path $HOME\qmk_firmware\keyboards\sofle_choc\keymaps\ethan_keymap -Target $HOME\Sofle-Choc-Keymap
+  ```
+- Optionally add this folder to your user `PATH` so `sofle` works from any directory.
